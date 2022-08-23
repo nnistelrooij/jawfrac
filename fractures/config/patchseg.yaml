@@ -1,0 +1,24 @@
+work_dir: '/home/mka3dlab/Documents/logs/patchseg'
+version: 1
+seed: 0
+
+model:
+  channels_list: [16, 32, 64, 128]
+  lr: 0.02
+  epochs: 25
+  warmup_epochs: 2
+  weight_decay: 0.01
+
+datamodule:
+  root: '/home/mka3dlab/Documents/jawfrac'
+  regex_filter: ''
+  val_size: 0.1
+  batch_size: 2
+  num_workers: 1
+  pin_memory: True
+  persistent_workers: True
+  crop_size: 64
+  stride: 48
+  bone_intensity_thresh: 0.0
+  bone_volume_thresh: 0.01
+  pos_iou_thresh: 0.1
