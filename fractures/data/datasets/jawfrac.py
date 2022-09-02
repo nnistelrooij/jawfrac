@@ -1,22 +1,15 @@
-import json
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict
 
 import nibabel
 import numpy as np
 from numpy.typing import NDArray
 
-from fractures.data.datasets.base import CTDataset
-from fractures.data.transforms import (
-    Compose,
-    Clip,
-    IntervalNormalize,
-    NaturalHeadPositionOrient,
-    RegularScale,
-)
+from miccai.data.datasets.base import MeshDataset
+import fractures.data.transforms as T
 
 
-class JawFracDataset(CTDataset):
+class JawFracDataset(MeshDataset):
     """Dataset to load mandibular CT scans with fracture segmentations."""
 
     MEAN = [2.0356, -0.6506, -90.0502]
@@ -24,38 +17,43 @@ class JawFracDataset(CTDataset):
 
     def __init__(
         self,
+        mandible_crop_padding: float,
+        regular_spacing: float,
         **kwargs: Dict[str, Any],
     ) -> None:
-        pre_transform = Compose(
-            Clip(level=450.0, width=1100.0),
-            IntervalNormalize(low=-1.0, high=1.0),
-            # RegularScale(scale=4.0),
-            # NaturalHeadPositionOrient(),
+        pre_transform = T.Compose(
+            T.MandibleCrop(padding=mandible_crop_padding),
+            T.RegularSpacing(spacing=regular_spacing),
+            T.NaturalHeadPositionOrient(),
         )
 
         super().__init__(pre_transform=pre_transform, **kwargs)
 
     def load_scan(
         self,
-        file: Path,
+        files: Path,
     ) -> Dict[str, NDArray[Any]]:
-        img = nibabel.load(self.root / file)
+        scan_file, mandible_file = files
+
+        img = nibabel.load(self.root / scan_file)
         intensities = np.asarray(img.dataobj)
+
+        seg = nibabel.load(self.root / mandible_file)
+        mask = np.asarray(seg.dataobj) == 1
 
         return {
             'intensities': intensities,
+            'mandible': mask,
             'affine': img.affine,
-            'zooms': np.array(img.header.get_zooms()),
         }
 
     def load_annotation(
         self,
         file: Path,
-    ) -> Dict[str, NDArray[np.int64]]:
+    ) -> Dict[str, NDArray[np.int16]]:
         seg = nibabel.load(self.root / file)
         labels = np.asarray(seg.dataobj, dtype=np.int16)
 
         return {
             'labels': labels,
         }
-    

@@ -5,14 +5,14 @@ import numpy as np
 import open3d
 from skimage.measure import marching_cubes
 
-root = Path('/home/mka3dlab/Documents/fractures')
+root = Path('/mnt/diag/nielsvannistelrooij/Fabian_test')
 
-for main_file in root.glob('**/*image.nii.gz'):
+for main_file in root.glob('**/image.nii.gz'):
     img = nibabel.load(main_file)
     img_data = img.get_fdata()
 
 
-    seg_file = list(main_file.parent.glob('*segmentation.nii.gz'))[0]
+    seg_file = list(main_file.parent.glob('seg.nii.gz'))[0]
     seg = nibabel.load(seg_file)
     seg_data = seg.get_fdata()
 
@@ -27,7 +27,7 @@ for main_file in root.glob('**/*image.nii.gz'):
 
     verts, faces, normals, values = marching_cubes(
         volume=img_data,
-        level=700,
+        level=1400,
         spacing=img.header.get_zooms(),
     )
 
@@ -35,6 +35,7 @@ for main_file in root.glob('**/*image.nii.gz'):
         vertices=open3d.utility.Vector3dVector(verts),
         triangles=open3d.utility.Vector3iVector(faces),
     )
+    mesh = mesh.simplify_quadric_decimation(100_000)
     mesh.compute_vertex_normals()
     # mesh.vertex_normals = open3d.utility.Vector3dVector(normals)
 

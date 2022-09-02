@@ -6,7 +6,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 from torchtyping import TensorType
 
 import fractures.nn as nn
-from fractures.optim.lr_scheduler import (
+from miccai.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearWarmupLR,
 )
@@ -25,7 +25,7 @@ class PatchROI(pl.LightningModule):
         super().__init__()
 
         self.model = nn.ConvNet(**model_cfg)
-        self.criterion = torch.nn.SmoothL1Loss()
+        self.criterion = torch.nn.BCEWithLogitsLoss()
 
         self.lr = lr
         self.epochs = epochs
@@ -43,8 +43,8 @@ class PatchROI(pl.LightningModule):
     def training_step(
         self,
         batch: Tuple[
-            TensorType['P', 'H', 'W', 'D', torch.float32],
-            TensorType['P', torch.float32],
+            TensorType['B', 'C', 'H', 'W', 'D', torch.float32],
+            TensorType['B', torch.float32],
         ],
         batch_idx: int,
     ) -> TensorType[torch.float32]:
@@ -52,7 +52,7 @@ class PatchROI(pl.LightningModule):
 
         x = self(x)
 
-        loss = self.criterion(x.squeeze(-1), y)
+        loss = self.criterion(x, y)
 
         self.log('loss/train', loss)
 

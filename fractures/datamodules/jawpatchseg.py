@@ -1,26 +1,13 @@
-from itertools import product
 from typing import Any, Dict, List, Optional, Tuple
-import random
-
-import numpy as np
-from scipy import ndimage
 import torch
 from torchtyping import TensorType
 
 from fractures.data.datasets import JawFracDataset
-from fractures.data.transforms import (
-    Compose,
-    IntensityAsFeatures,
-    ToTensor,
-    IntersectionOverUnion,
-    CropCenters,
-    BoneCenters,
-    BoundingBoxes,
-)
-from fractures.datamodules.jawseg import JawSegDataModule
+import fractures.data.transforms as T
+from fractures.datamodules.jawfrac import JawFracDataModule
 
 
-class JawPatchSegDataModule(JawSegDataModule):
+class JawFracPatchDataModule(JawFracDataModule):
 
     def __init__(
         self,
@@ -33,16 +20,19 @@ class JawPatchSegDataModule(JawSegDataModule):
     ) -> None:
         super().__init__(**dm_cfg)
 
-        self.default_transforms = Compose(
-            IntensityAsFeatures(),
-            # CropCenters(crop_size=64, stride=32),
-            # BoneCenters(),
-            # BoundingBoxes(),
-            # IntersectionOverUnion(),
-            ToTensor(),
+        self.default_transforms = T.Compose(
+            T.CropCenters(crop_size=crop_size, stride=32),
+            T.BoneCenters(intensity_thresh=500),
+            T.BoundingBoxes(),
+            T.IntersectionOverUnion(),
+            T.IntensityAsFeatures(
+                level=450.0, width=1100.0,
+                low=-1.0, high=1.0,
+            ),
+            T.ToTensor(),
         )
 
-        self.crop_size = crop_size
+        self.crop_size = (crop_size,)*3
         self.stride = stride
         self.intensity_thresh = bone_intensity_thresh
         self.volume_thresh = bone_volume_thresh
@@ -58,93 +48,54 @@ class JawPatchSegDataModule(JawSegDataModule):
                 root=self.root,
                 files=train_files,
                 transform=self.default_transforms,
+                **self.dataset_cfg,
             )
             self.val_dataset = JawFracDataset(
                 stage='fit',
                 root=self.root,
                 files=val_files,
                 transform=self.default_transforms,
+                **self.dataset_cfg,
+            )
+
+        if stage is None or stage == 'predict':
+            files = self._files('predict')
+
+            self.predict_dataset = JawFracDataset(
+                stage='predict',
+                root=self.root,
+                files=files,
+                transform=self.default_transforms,
+                **self.dataset_cfg,
             )
 
     @property
     def num_channels(self) -> int:
-        return 1
-
-    def crop_slices(
-        self,
-        features: TensorType['C', 'H', 'W', 'D', torch.float32],
-    ) -> List[Tuple[slice, slice, slice, slice]]:
-        xyz_coords = []
-        for dim in features.shape[1:]:
-            start_coords = np.arange(0, dim - self.crop_size // 2, self.stride)
-            start_coords = np.clip(start_coords, 0, dim - self.crop_size)
-
-            xyz_coords.append(start_coords)
-
-        crop_coords = np.stack(list(product(*xyz_coords)))
-        slice_coords = np.dstack((crop_coords, crop_coords + self.crop_size))
-        slices = [tuple(slice(*c) for c in coords) for coords in slice_coords]
-        slices = [(slice(None),) + slices for slices in slices]
-
-        return slices
-
-    def bone_crop_slices(
-        self,
-        features: TensorType['C', 'H', 'W', 'D', torch.float32],
-        slices: List[Tuple[slice, slice, slice, slice]],
-    ) -> List[Tuple[slice, slice, slice, slice]]:
-        bone_slices = []
-        for slices in slices:
-            patch_bone = features[slices] >= self.intensity_thresh
-            if patch_bone.float().mean() >= self.volume_thresh:
-                bone_slices.append(slices)
-
-        return bone_slices
-
-    def bbox_ious(
-        self,
-        labels: TensorType['H', 'W', 'D', torch.float32],
-        slices: List[Tuple[slice, slice, slice, slice]],
-    ) -> TensorType['P', torch.float32]:
-        bbox_slices = []
-        for obj in ndimage.find_objects(labels):
-            bbox_slices.append((
-                slice(obj[0].start, obj[0].stop),
-                slice(obj[1].start, obj[1].stop),
-                slice(obj[2].start, obj[2].stop),
-            ))
-
-        filled = torch.zeros(labels.shape)
-        for bbox_slices in bbox_slices:
-            filled[bbox_slices] = 1
-
-        ious = torch.zeros(len(slices))
-        for i, slices in enumerate(slices):
-            slices = slices[1:]
-            ious[i] = torch.any(labels[slices]) * filled[slices].mean()
-
-        return ious        
+        return 1      
 
     def crop_patches(
-        self,
+        self,    
         features: TensorType['C', 'H', 'W', 'D', torch.float32],
-        labels: TensorType['H', 'W', 'D', torch.float32],
+        slices: TensorType['S', 3, 2, torch.int64],
+        ious: TensorType['S', torch.float32],
+        **kwargs,
     ) -> Tuple[
         TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
         TensorType['P', torch.float32],
     ]:
-        slices = self.crop_slices(features)
-        slices = self.bone_crop_slices(features, slices)
-
-        ious = self.bbox_ious(labels, slices)
+        # determine balanced sample of patches
         pos_idxs = (ious >= self.iou_thresh).nonzero()[:, 0]
         neg_idxs = (ious < self.iou_thresh).nonzero()[:, 0]
         neg_idxs = neg_idxs[torch.randperm(neg_idxs.shape[0])]
         neg_idxs = neg_idxs[:pos_idxs.shape[0]]
         idxs = torch.cat((pos_idxs, neg_idxs))
 
-        slices = [slices[i] for i in idxs]
-        patches = torch.stack([features[slices] for slices in slices])
+        # crop patches from volume and stack
+        patches = torch.zeros(0, self.num_channels, *self.crop_size)
+        for slices in slices[idxs].numpy():
+            crop = (slice(None),) + tuple(map(lambda s: slice(*s), slices))
+            patches = torch.cat((patches, features[(None,) + crop]))
+
         ious = ious[idxs]
         
         return patches, ious
@@ -153,15 +104,13 @@ class JawPatchSegDataModule(JawSegDataModule):
         self,
         batch: List[Dict[str, TensorType[..., Any]]],
     ) -> Tuple[
-        TensorType['P', 'size', 'size', 'size', torch.float32],
+        TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
         TensorType['P', torch.float32],
     ]:
-        patches = torch.zeros(0, self.num_channels, *(self.crop_size,)*3)
+        patches = torch.zeros(0, self.num_channels, *self.crop_size)
         ious = torch.zeros(0)
         for data_dict in batch:
-            batch_patches, batch_ious = self.crop_patches(
-                data_dict['intensities'], data_dict['labels'],
-            )
+            batch_patches, batch_ious = self.crop_patches(**data_dict)
             
             patches = torch.cat((patches, batch_patches))
             ious = torch.cat((ious, batch_ious))

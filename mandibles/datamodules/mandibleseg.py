@@ -1,14 +1,14 @@
 from pathlib import Path
 import re
-from typing import List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 import pytorch_lightning as pl
 from sklearn.model_selection import ShuffleSplit
 from torch.utils.data import DataLoader, Dataset
 
 
-class JawSegDataModule(pl.LightningDataModule):
-    """Implements data module that loads meshes of the 3DTeethSeg challenge."""
+class MandibleSegDataModule(pl.LightningDataModule):
+    """Implements data module that loads CBCT scans with annotated mandibles."""
 
     def __init__(
         self,
@@ -20,6 +20,7 @@ class JawSegDataModule(pl.LightningDataModule):
         pin_memory: bool,
         persistent_workers: bool,
         seed: int,
+        **dataset_cfg: Dict[str, Any],
     ):        
         super().__init__()
         
@@ -31,22 +32,30 @@ class JawSegDataModule(pl.LightningDataModule):
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers
         self.seed =  seed
+        self.dataset_cfg = dataset_cfg
 
     def _files(
         self,
         stage: str,
-        exclude: List[str]=[],
+        exclude: List[str]=[
+            # OOM
+            'camila-blind-pelican',
+            'fiona-common-gecko',
+            'melisenda-comparative-goldfish',
+            'celestia-experienced-bear',
+            'camila-blind-pelican',
+            'peggy-then-gamefowl',
+        ],
     ) -> Union[List[Path], List[Tuple[Path, Path]]]:
-        scan_files = sorted(self.root.glob('**/test4d.nii.gz'))
+        scan_files = sorted(self.root.glob('**/image.nii.gz'))
         scan_files = [f for f in scan_files if re.search(self.filter, str(f))]
         scan_files = [f for f in scan_files if f.parent.name not in exclude]
         scan_files = [f.relative_to(self.root) for f in scan_files]
 
-
         if stage == 'predict':
             return scan_files
 
-        ann_files = sorted(self.root.glob('**/label4d.nii.gz'))
+        ann_files = sorted(self.root.glob('**/seg.nii.gz'))
         ann_files = [f for f in ann_files if re.search(self.filter, str(f))]
         ann_files = [f for f in ann_files if f.parent.name not in exclude]
         ann_files = [f.relative_to(self.root) for f in ann_files]
@@ -57,6 +66,11 @@ class JawSegDataModule(pl.LightningDataModule):
         self,
         files: List[Tuple[Path, Path]],
     ) -> Tuple[List[Tuple[Path, Path]]]:
+        if self.val_size == 0.0:
+            return files, []
+        elif self.val_size == 1.0:
+            return [], files
+    
         ss = ShuffleSplit(
             n_splits=1, test_size=self.val_size, random_state=self.seed,
         )

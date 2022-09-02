@@ -1,3 +1,4 @@
 [submodule "miccai"]
 	path = miccai
 	url = https://github.com/nnistelrooij/miccai.git
+        branch = main

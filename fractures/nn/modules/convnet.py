@@ -32,7 +32,7 @@ class ConvNet(nn.Module):
     ) -> TensorType['B', torch.float32]:
         x = self.layers(x)
         x = x.mean(dim=(2, 3, 4))
-        x = self.head(x)
+        x = self.head(x).squeeze(-1)
 
         return x
 
@@ -109,6 +109,7 @@ class ConvBlock(nn.Module):
         x: TensorType['B', 'C', 'H', 'W', 'D', torch.float32],
     ) -> TensorType['B', 'C', 'H', 'W', 'D', torch.float32]:
         return self.layers(x)
+
 
 class ConvTransposeBlock(nn.Module):
 

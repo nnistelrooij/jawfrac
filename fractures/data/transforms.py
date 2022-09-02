@@ -1,164 +1,103 @@
 from itertools import product
-from typing import Any, Callable, Dict, List
+from typing import Any, Dict
 
 import nibabel.orientations as ornts
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 from scipy import ndimage
-import torch
-from torchtyping import TensorType
+
+from miccai.data.transforms import *
 
 
-class Compose:
-
-    def __init__(
-        self,
-        *transforms: List[Callable[..., Dict[str, Any]]],
-    ):
-        self.transforms = transforms
-
-    def __call__(
-        self,
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        for t in self.transforms:
-            data_dict = t(**data_dict)
-        
-        return data_dict
-
-    def __repr__(self) -> str:
-        return '\n'.join([
-            self.__class__.__name__ + '(',
-            *[
-                '    ' + repr(t).replace('\n', '\n    ') + ','
-                for t in self.transforms
-            ],
-            ')',
-        ])
-
-
-class ToTensor:
+class MandibleCrop:
 
     def __init__(
         self,
-        bool_dtypes: List[np.dtype]=[bool, np.bool8],
-        int_dtypes: List[np.dtype]=[int, np.int16, np.uint16, np.int32, np.int64],
-        float_dtypes: List[np.dtype]=[float, np.float32, np.float64],
+        padding: Union[float, ArrayLike],
     ) -> None:
-        self.bool_dtypes = bool_dtypes
-        self.int_dtypes = int_dtypes
-        self.float_dtypes = float_dtypes
-
-    def __call__(
-        self,
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, TensorType[..., Any]]:
-        for k, v in data_dict.items():
-            dtype = v.dtype if isinstance(v, np.ndarray) else type(v)
-            if dtype in self.bool_dtypes:
-                data_dict[k] = torch.tensor(v.copy(), dtype=torch.bool)
-            elif dtype in self.int_dtypes:
-                data_dict[k] = torch.tensor(v.copy(), dtype=torch.int64)            
-            elif dtype in self.float_dtypes:
-                data_dict[k] = torch.tensor(v.copy(), dtype=torch.float32)
-            else:
-                raise ValueError(
-                    'Expected a scalar or list or NumPy array with elements of '
-                    f'{self.bool_dtypes + self.int_dtypes + self.float_dtypes},'
-                    f' but got {dtype}.'
-                )
-            
-        return data_dict
-
-    def __repr__(self) -> str:
-        return self.__class__.__name__ + '()'
-
-
-class Clip:
-
-    "Clip the values of the input around the provided level."
-
-    def __init__(
-        self,
-        level: float,
-        width: float,
-    ) -> None:
-        self.low = level - width / 2
-        self.high = level + width / 2
+        self.padding = padding
 
     def __call__(
         self,
         intensities: NDArray[Any],
+        mandible: NDArray[Any],
+        affine: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        data_dict['intensities'] = np.clip(intensities, self.low, self.high)
+        # set all intensities outside mandible to -1000
+        mask = ndimage.binary_dilation(
+            input=mandible,
+            structure=ndimage.generate_binary_structure(3, 2),
+            iterations=10,
+        )
+        intensities[~mask] = -1000
 
-        return data_dict
+        # crop volume to largest annotated connected component
+        labels, num_labels = ndimage.label(mandible)
+        sizes = ndimage.sum(mandible, labels, range(1, num_labels + 1))
+        bbox = ndimage.find_objects(labels == (sizes.argmax() + 1))[0]
 
-    def __repr__(self) -> str:
-        return '\n'.join([
-            self.__class__.__name__ + '(',
-            f'    low={self.low},',
-            f'    high={self.high},',
-            ')',
-        ])
+        spacing = np.abs(affine[:, :3].sum(axis=0))
+        padding = np.ceil(self.padding / spacing).astype(int)
 
+        slices = ()
+        for slice_, pad in zip(bbox, padding):
+            start = max(slice_.start - pad, 0)
+            end = slice_.stop + pad
+            slices += (slice(start, end),)
 
-class IntervalNormalize:
-    
-    def __init__(
-        self,
-        low: float,
-        high: float,
-    ) -> None:
-        self.low = low
-        self.range = high - low
-
-    def __call__(
-        self,
-        intensities: NDArray[Any],
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        intensities = intensities - intensities.min()
-        intensities = intensities / intensities.max()
-
-        data_dict['intensities'] = (intensities * self.range) + self.low
-
-        return data_dict
-
-    def __repr__(self) -> str:
-        return '\n'.join([
-            self.__class__.__name__ + '(',
-            f'    low={self.low},',
-            f'    high={self.low + self.range},',
-            ')',
-        ])
-
-    
-class RegularScale:
-
-    def __init__(
-        self,
-        scale: float,
-    ) -> None:
-        self.scale = scale
-
-    def __call__(
-        self,
-        intensities: NDArray[Any],
-        zooms: NDArray[Any],
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        intensities = ndimage.zoom(intensities, self.scale * zooms)
-
-        data_dict['intensities'] = intensities
-        data_dict['zooms'] = zooms
+        data_dict['intensities'] = intensities[slices]
+        data_dict['mandible'] = mandible[slices]
+        data_dict['affine'] = affine
 
         if 'labels' in data_dict:
-            labels = ndimage.zoom(data_dict['labels'], self.scale * zooms)
+            data_dict['labels'] = data_dict['labels'][slices]
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    padding={self.padding},',
+            ')',
+        ])
+
+    
+class RegularSpacing:
+
+    def __init__(
+        self,
+        spacing: Union[float, ArrayLike],
+    ) -> None:
+        self.spacing = spacing
+
+    def __call__(
+        self,
+        intensities: NDArray[Any],
+        mandible: NDArray[Any],
+        affine: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        zooms = np.abs(np.sum(affine[:, :3], axis=0))
+        intensities = ndimage.zoom(intensities, zooms / self.spacing)
+        mandible = ndimage.zoom(mandible, zooms / self.spacing)
+
+        data_dict['intensities'] = intensities
+        data_dict['mandible'] = mandible
+        data_dict['affine'] = affine
+
+        if 'labels' in data_dict:
+            labels = ndimage.zoom(data_dict['labels'], zooms / self.spacing)
             data_dict['labels'] = labels
 
         return data_dict
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    spacing={self.spacing},',
+            ')',
+        ])
 
 
 class NaturalHeadPositionOrient:
@@ -166,11 +105,13 @@ class NaturalHeadPositionOrient:
     def __call__(
         self,
         intensities: NDArray[Any],
+        mandible: NDArray[Any],
         affine: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         orientation = ornts.io_orientation(affine)
         intensities = ornts.apply_orientation(intensities, orientation)
+        mandible = ornts.apply_orientation(mandible, orientation)
 
         data_dict['intensities'] = intensities
         data_dict['affine'] = affine
@@ -178,6 +119,12 @@ class NaturalHeadPositionOrient:
         if 'labels' in data_dict:
             labels = ornts.apply_orientation(data_dict['labels'], orientation)
             data_dict['labels'] = labels
+
+        import nibabel
+        img = nibabel.Nifti1Image(intensities, np.eye(4))
+        nibabel.save(img, '/home/mka3dlab/Documents/fractures/test.nii.gz')
+        img = nibabel.Nifti1Image(labels, np.eye(4))
+        nibabel.save(img, '/home/mka3dlab/Documents/fractures/frac.nii.gz')
 
         return data_dict
 
@@ -210,8 +157,8 @@ class CropCenters:
         crop_coords = np.stack(list(product(*xyz_coords)))
         slice_coords = np.dstack((crop_coords, crop_coords + self.crop_size))
 
-        data_dict['crop_slices'] = slice_coords
         data_dict['intensities'] = intensities
+        data_dict['slices'] = slice_coords
 
         return data_dict
 
@@ -227,7 +174,7 @@ class BoneCenters:
 
     def __init__(
         self,
-        intensity_thresh: float=0.4,
+        intensity_thresh: float=500,
         volume_thresh: float=0.1
     ) -> None:
         self.intensity_thresh = intensity_thresh
@@ -236,19 +183,18 @@ class BoneCenters:
     def __call__(
         self,
         intensities: NDArray[Any],
-        crop_slices: NDArray[Any],
+        slices: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         bone_slices = []
-        for slices in crop_slices:
+        for slices in slices:
             crop = intensities[tuple(map(lambda s: slice(*s), slices))]
             crop_bone = crop >= self.intensity_thresh
             if crop_bone.mean() >= self.volume_thresh:
                 bone_slices.append(slices)
 
-        data_dict['bone_slices'] = np.stack(bone_slices)
         data_dict['intensities'] = intensities
-        data_dict['crop_slices'] = crop_slices
+        data_dict['slices'] = np.stack(bone_slices)
 
         return data_dict
 
@@ -289,23 +235,23 @@ class IntersectionOverUnion:
 
     def __call__(
         self,
-        bone_slices: NDArray[Any],
         labels: NDArray[Any],
+        slices: NDArray[Any],
         bboxes: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         filled = np.zeros_like(labels)
         for bbox in bboxes:
-            slices = tuple(map(lambda s: slice(*s), bbox))
-            filled[slices] = 1
+            crop = tuple(map(lambda s: slice(*s), bbox))
+            filled[crop] = 1
 
-        ious = np.zeros(bone_slices.shape[0])
-        for i, slices in enumerate(bone_slices):
-            slices = tuple(map(lambda s: slice(*s), slices))
-            ious[i] = np.any(labels[slices]) * filled[slices].mean()
+        ious = np.zeros(slices.shape[0])
+        for i, crop in enumerate(slices):
+            crop = tuple(map(lambda s: slice(*s), crop))
+            ious[i] = np.any(labels[crop]) * filled[crop].mean()
 
-        data_dict['bone_slices'] = bone_slices
         data_dict['labels'] = labels
+        data_dict['slices'] = slices
         data_dict['bboxes'] = bboxes
         data_dict['ious'] = ious
 
@@ -317,14 +263,40 @@ class IntersectionOverUnion:
 
 class IntensityAsFeatures:
 
+    def __init__(
+        self,
+        level: float=450.0,
+        width: float=1100.0,
+        low: float=-1.0,
+        high: float=1.0,
+    ) -> None:
+        self.min = level - width / 2
+        self.max = level + width / 2
+        self.low = low
+        self.range = high - low
+
     def __call__(
         self,
         intensities: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        data_dict['intensities'] = intensities[np.newaxis]
+        data_dict['intensities'] = intensities
+
+        intensities = intensities.clip(self.min, self.max)
+        intensities -= self.min
+        intensities /= self.max - self.min
+        intensities = (intensities * self.range) + self.low
+
+        data_dict['features'] = intensities[np.newaxis]
 
         return data_dict
 
     def __repr__(self) -> str:
-        return self.__class__.__name__ + '()'
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    level={(self.min + self.max) / 2},',
+            f'    width={self.max - self.min},',
+            f'    low={self.low},',
+            f'    high={self.low + self.range},',
+            ')',
+        ])

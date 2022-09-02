@@ -1,7 +1,7 @@
 matplotlib==3.5.2
 nibabel==4.0.1
-open3d==0.15.2
-pytorch_lightning==1.7.0
+numpy==1.22
+pydicom==2.3.0
+pylibjpeg[libjpeg,openjpeg,rle]==1.4.0
+pytorch_lightning==1.6.4
 scikit-image==0.19.3
-scikit-multilearn==0.2.0
-torchtyping==0.1.4

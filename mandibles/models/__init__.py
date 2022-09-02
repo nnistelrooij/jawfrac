@@ -1,0 +1,1 @@
+from mandibles.models.voxel_classifier import VoxelClassifier

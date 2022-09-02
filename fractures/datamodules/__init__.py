@@ -1,1 +1,1 @@
-from fractures.datamodules.jawpatchseg import JawPatchSegDataModule
+from fractures.datamodules.jawpatchseg import JawFracPatchDataModule
