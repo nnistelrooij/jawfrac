@@ -34,28 +34,29 @@ class JawFracDataModule(pl.LightningDataModule):
         self.seed =  seed
         self.dataset_cfg = dataset_cfg
 
+    def _filter_files(
+        self,
+        pattern: str,
+        exclude: List[str]=['3', '7'],
+    ) -> List[Path]:
+        files = sorted(self.root.glob(pattern))
+        files = [f for f in files if re.search(self.filter, str(f))]
+        files = [f for f in files if f.parent.name not in exclude]
+        files = [f.relative_to(self.root) for f in files]
+
+        return files        
+
     def _files(
         self,
         stage: str,
-        exclude: List[str]=[],
     ) -> Union[List[Path], List[Tuple[Path, Path]]]:
-        scan_files = sorted(self.root.glob('**/image.nii.gz'))
-        scan_files = [f for f in scan_files if re.search(self.filter, str(f))]
-        scan_files = [f for f in scan_files if f.parent.name not in exclude]
-        scan_files = [f.relative_to(self.root) for f in scan_files]
-
-        jaw_files = sorted(self.root.glob('**/mandible.nii.gz'))
-        jaw_files = [f for f in jaw_files if re.search(self.filter, str(f))]
-        jaw_files = [f for f in jaw_files if f.parent.name not in exclude]
-        jaw_files = [f.relative_to(self.root) for f in jaw_files]
+        scan_files = self._filter_files('**/image.nii.gz')
+        jaw_files = self._filter_files('**/mandible.nii.gz')
 
         if stage == 'predict':
             return list(zip(scan_files, jaw_files))
 
-        frac_files = sorted(self.root.glob('**/fractures.nii.gz'))
-        frac_files = [f for f in frac_files if re.search(self.filter, str(f))]
-        frac_files = [f for f in frac_files if f.parent.name not in exclude]
-        frac_files = [f.relative_to(self.root) for f in frac_files]
+        frac_files = self._filter_files('**/label.nii.gz')
         
         return list(zip(zip(scan_files, jaw_files), frac_files))
 
@@ -98,6 +99,9 @@ class JawFracDataModule(pl.LightningDataModule):
 
     def val_dataloader(self) -> DataLoader:
         return self._dataloader(self.val_dataset)
+
+    def test_dataloader(self) -> DataLoader:
+        return self._dataloader(self.test_dataset)
 
     def predict_dataloader(self) -> DataLoader:
         return self._dataloader(self.predict_dataset)

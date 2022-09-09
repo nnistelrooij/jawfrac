@@ -19,9 +19,7 @@ class MandibleSemSegDataModule(MandibleSegDataModule):
     ):
         super().__init__(**dm_cfg)
 
-        self.default_transforms = T.Compose(
-            T.ToTensor(),
-        )
+        self.default_transforms = T.ToTensor()
 
     def setup(self, stage: Optional[str]=None):
         if stage is None or stage == 'fit':
@@ -77,6 +75,7 @@ class MandibleSemSegDataModule(MandibleSegDataModule):
         Tuple[PointTensor, PointTensor],
         Tuple[
             PointTensor,
+            TensorType['N', 3, torch.float32],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
         ],
@@ -94,10 +93,15 @@ class MandibleSemSegDataModule(MandibleSegDataModule):
         )
 
         if 'labels' not in batch_dict:
+            fg_coords = x.C.clone()
+
+            downsample_idxs = batch_dict['downsample_idxs'][0]
+            x = x[downsample_idxs]
+
             affine = batch_dict['affine'][0]
             shape = batch_dict['shape'][0]
 
-            return x, affine, shape
+            return x, fg_coords, affine, shape
 
         labels = torch.cat(batch_dict['labels'])
         labels = (labels == 2).long()
@@ -116,6 +120,7 @@ class MandibleSemSegDataModule(MandibleSegDataModule):
             Tuple[PointTensor, PointTensor],
             Tuple[
                 PointTensor,
+                TensorType['N', 3, torch.float32],
                 TensorType[4, 4, torch.float32],
                 TensorType[3, torch.int64],
             ],
@@ -126,6 +131,7 @@ class MandibleSemSegDataModule(MandibleSegDataModule):
         Tuple[PointTensor, PointTensor],
         Tuple[
             PointTensor,
+            TensorType['N', 3, torch.float32],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
         ],

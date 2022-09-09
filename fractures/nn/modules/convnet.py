@@ -37,53 +37,6 @@ class ConvNet(nn.Module):
         return x
 
 
-class FracNet(nn.Module):
-
-    def __init__(
-        self,
-        in_channels: int,
-    ) -> None:
-        super().__init__()
-
-        self.encoder = Encoder(
-            in_channels,
-            [16, 32, 64, 128],
-        )
-
-
-
-class Encoder(nn.Module):
-    
-    def __init__(
-        self,
-        in_channels: int,
-        channels_list: List[int],
-    ) -> None:
-        super().__init__()
-
-        channels_list = [in_channels] + channels_list
-        self.layers = nn.ModuleList()
-        for i in range(len(channels_list) - 1):
-            self.layers.append(
-                ConvBlock(channels_list[i], channels_list[i + 1], 3, 1)
-            )
-
-    def forward(
-        self,
-        x: TensorType['B', 'C', 'H', 'W', 'D', torch.float32],
-    ) -> List[TensorType['B', 'C', 'H', 'W', 'D', torch.float32]]:
-        x = self.layers[0](x)
-
-        xs = [x]
-        for layer in self.layers[1:]:
-            x = F.max_pool3d(x, kernel_size=2)
-            x = layer(x)
-            xs.append(x)
-
-        return xs
-
-
-
 class ConvBlock(nn.Module):
 
     def __init__(
@@ -117,12 +70,12 @@ class ConvTransposeBlock(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size,
+        kernel_size: int,
     ) -> None:
         super().__init__()
 
         self.layers = nn.Sequential(
-            nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=2),
+            nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=2, padding=1, output_padding=1),
             nn.BatchNorm3d(out_channels),
             nn.LeakyReLU(),
         )

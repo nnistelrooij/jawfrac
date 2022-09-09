@@ -4,7 +4,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import yaml
 
 from fractures.datamodules import JawFracPatchDataModule
-from fractures.models.semseg import SemSegModule
+from fractures.models import PatchROI
 
 
 def train():
@@ -17,11 +17,7 @@ def train():
         seed=config['seed'], **config['datamodule'],
     )
 
-    model = SemSegModule(
-        in_channels=dm.num_channels,
-        num_classes=dm.num_classes,
-        **config['model'],
-    )
+    model = PatchROI(in_channels=dm.num_channels, **config['model'])
 
 
     logger = TensorBoardLogger(
@@ -53,7 +49,7 @@ def train():
         max_epochs=config['model']['epochs'],
         logger=logger,
         # accumulate_grad_batches=4,
-        gradient_clip_val=1,
+        gradient_clip_val=35,
         callbacks=[
             epoch_checkpoint_callback,
             loss_checkpoint_callback,

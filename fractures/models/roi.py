@@ -34,8 +34,8 @@ class PatchROI(pl.LightningModule):
 
     def forward(
         self,
-        x: TensorType['B', 'C', 'H', 'W', 'D', torch.float32],        
-    ) -> TensorType['B', torch.float32]:
+        x: TensorType['P', 'C', 'size', 'size', 'size', torch.float32],       
+    ) -> TensorType['P', torch.float32]:
         x = self.model(x)
 
         return x
@@ -43,8 +43,8 @@ class PatchROI(pl.LightningModule):
     def training_step(
         self,
         batch: Tuple[
-            TensorType['B', 'C', 'H', 'W', 'D', torch.float32],
-            TensorType['B', torch.float32],
+            TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
+            TensorType['P', torch.float32],
         ],
         batch_idx: int,
     ) -> TensorType[torch.float32]:
@@ -61,7 +61,7 @@ class PatchROI(pl.LightningModule):
     def validation_step(
         self,
         batch: Tuple[
-            TensorType['P', 'H', 'W', 'D', torch.float32],
+            TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
             TensorType['P', torch.float32],
         ],
         batch_idx: int,
@@ -73,6 +73,15 @@ class PatchROI(pl.LightningModule):
         loss = self.criterion(x, y)
 
         self.log('loss/val', loss)
+
+    def predict_step(
+        self,
+        batch: TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
+        batch_idx: int,
+    ) -> TensorType['P', torch.float32]:
+        x = self(batch)
+
+        return x
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],

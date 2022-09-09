@@ -12,19 +12,25 @@ import fractures.data.transforms as T
 class JawFracDataset(MeshDataset):
     """Dataset to load mandibular CT scans with fracture segmentations."""
 
-    MEAN = [2.0356, -0.6506, -90.0502]
-    STD = 17.3281
-
     def __init__(
         self,
         mandible_crop_padding: float,
         regular_spacing: float,
+        patch_size: int,
+        stride: int,
+        bone_hu_threshold: int,
+        bone_volume_threshold: float,
         **kwargs: Dict[str, Any],
     ) -> None:
         pre_transform = T.Compose(
             T.MandibleCrop(padding=mandible_crop_padding),
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
+            T.PatchIndices(patch_size=patch_size, stride=stride),
+            T.BonePatchIndices(
+                intensity_thresh=bone_hu_threshold,
+                volume_thresh=bone_volume_threshold,
+            ),
         )
 
         super().__init__(pre_transform=pre_transform, **kwargs)
@@ -44,7 +50,9 @@ class JawFracDataset(MeshDataset):
         return {
             'intensities': intensities,
             'mandible': mask,
-            'affine': img.affine,
+            'spacing': np.array(img.header.get_zooms()),
+            'orientation': nibabel.io_orientation(img.affine),
+            'shape': np.array(img.header.get_data_shape()),
         }
 
     def load_annotation(

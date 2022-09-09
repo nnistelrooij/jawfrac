@@ -6,7 +6,6 @@ from mandibles.datamodules import MandibleSemSegDataModule
 from mandibles.models import VoxelClassifier
 import nibabel
 import numpy as np
-from scipy import ndimage
 
 
 def infer():
@@ -19,7 +18,7 @@ def infer():
     )
 
     model = VoxelClassifier.load_from_checkpoint(
-        'checkpoints/mandible.ckpt',
+        'checkpoints/mandible4.ckpt',
         in_channels=dm.num_channels,
         num_classes=dm.num_classes,
         **config['model'],
@@ -32,34 +31,16 @@ def infer():
     )
     preds = trainer.predict(model, datamodule=dm)
 
-    for i, volume in enumerate(preds):
+    for i, volume in enumerate(tqdm(preds, desc='Writing NIfTI files')):
         # get original scan
         path = dm.root / dm.pred_dataset.files[i]
-        print(path)
         img = nibabel.load(path)
-        img_data = np.asarray(img.dataobj)
         affine = img.affine
 
-        # label, _ = ndimage.label(
-        #     input=img_data >= 700,
-        #     structure=ndimage.generate_binary_structure(3, 2),
-        # )
-        # volume[label == 1] = True
-
-        # dilate sparse predictions
-        seg = volume.cpu().numpy()
-        seg = ndimage.binary_dilation(
-            input=seg,
-            structure=ndimage.generate_binary_structure(3, 2),
-            iterations=5,
-            mask=np.asarray(img.dataobj) >= 300,
-        )
-        seg = seg.astype(np.uint16)
-
         # save to storage
-        img = nibabel.Nifti1Image(seg, affine)
+        img = nibabel.Nifti1Image(volume.astype(np.uint16), affine)
         nibabel.save(img, path.parent / 'mandible.nii.gz')
 
 
 if __name__ == '__main__':
-    preds = infer()
+    infer()

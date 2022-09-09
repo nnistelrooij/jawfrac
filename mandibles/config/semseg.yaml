@@ -1,5 +1,5 @@
 work_dir: '/home/mka3dlab/Documents/logs/semseg'
-version: 2
+version: 5
 seed: 0
 
 model:
@@ -21,13 +21,15 @@ model:
   weight_decay: 0.05
   epochs: 100
   warmup_epochs: 5
+  prob_threshold: 0.9
 
 datamodule:
   root: '/mnt/diag/nielsvannistelrooij/Fabian_clean'
+  # root: '/mnt/diag/nielsvannistelrooij/Fabian_split'
   # root: '/home/mka3dlab/Documents/fractures/jawfrac'
   regex_filter: ''
   val_size: 0.2
-  batch_size: 2
+  batch_size: 1
   num_workers: 1
   pin_memory: False
   persistent_workers: True

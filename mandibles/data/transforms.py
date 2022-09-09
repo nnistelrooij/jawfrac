@@ -59,7 +59,7 @@ class ToPointCloud:
             mask[small_components[inverse.reshape(mask.shape)]] = False
 
             # save labels of remaining voxels as COO features
-            data_dict['labels'] = labels[mask].flatten()        
+            data_dict['labels'] = labels[mask]      
         
         # compute subject-centered coordinates of remaining voxels
         coords = np.column_stack(mask.nonzero())
@@ -67,7 +67,7 @@ class ToPointCloud:
 
         affine[:3, 3] = 0
 
-        data_dict['intensities'] = intensities[mask].flatten()
+        data_dict['intensities'] = intensities[mask]
         data_dict['affine'] = affine
         data_dict['points'] = coords
         data_dict['point_count'] = coords.shape[0]
@@ -141,10 +141,9 @@ class IntensityAsFeatures:
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         data_dict['intensities'] = intensities
-
+        
         intensities = intensities.clip(self.min, self.max)
-        intensities -= self.min
-        intensities /= self.max - self.min
+        intensities = (intensities - self.min) / (self.max - self.min)
         intensities = (intensities * self.range) + self.low
 
         if 'features' in data_dict:

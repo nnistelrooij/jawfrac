@@ -19,6 +19,7 @@ class MandibleSegDataset(MeshDataset):
 
     def __init__(
         self,
+        stage: str,
         foreground_hu_threshold: float,
         downsample_voxel_size: float,
         downsample_max_points: int,
@@ -27,21 +28,22 @@ class MandibleSegDataset(MeshDataset):
         pre_transform = T.Compose(
             T.ToPointCloud(intensity_thresh=foreground_hu_threshold),
             T.Rotate('xy', [180, 90]),  # Fabian
-            # Rotate('yx', [180, 90]),  # Sophie
-            T.ZScoreNormalize(self.MEAN, self.STD),
+            # T.Rotate('yx', [180, 90]),  # Sophie
+            # T.ZScoreNormalize(self.MEAN, self.STD),
+            T.ZScoreNormalize(),
             T.IntensityAsFeatures(),
             T.XYZAsFeatures(),
             T.PointCloudDownsample(
                 voxel_size=downsample_voxel_size,
-                inplace=True,
+                inplace=stage == 'fit',
             ),
             T.NearestNeighborCrop(
                 neigbors=downsample_max_points,
                 seed_fn=lambda points: points[:, 2].argmax(),
-            ),
+            ) if stage == 'fit' else dict,
         )
 
-        super().__init__(pre_transform=pre_transform, **kwargs)
+        super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)
 
     def load_scan(
         self,
@@ -53,7 +55,7 @@ class MandibleSegDataset(MeshDataset):
         return {
             'intensities': intensities,
             'affine': img.affine,
-            'shape': np.array(img.shape),
+            'shape': np.array(intensities.shape),
         }
 
     def load_annotation(
