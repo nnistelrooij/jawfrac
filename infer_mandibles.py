@@ -12,7 +12,7 @@ def infer():
     with open('mandibles/config/semseg.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
-    config['batch_size'] = 1
+    config['datamodule']['batch_size'] = 1
     dm = MandibleSemSegDataModule(
         seed=config['seed'], **config['datamodule'],
     )

@@ -4,32 +4,22 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 import yaml
 from tqdm import tqdm
 
-from mandibles.datamodules import MandibleSemSegDataModule
-from mandibles.models import VoxelClassifier
-from miccai.visualization import draw_point_clouds
+from mandibles.datamodules import MandiblePatchSegDataModule
+from mandibles.models import MandiblePatchSegModule
 
 
 def train():
-    with open('mandibles/config/semseg.yaml', 'r') as f:
+    with open('mandibles/config/patchseg.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     pl.seed_everything(config['seed'], workers=True)
 
-    dm = MandibleSemSegDataModule(
+    dm = MandiblePatchSegDataModule(
         seed=config['seed'], **config['datamodule'],
     )
     dm.setup('fit')
 
-    for i, batch in enumerate(tqdm(iter(dm.val_dataloader()), total=len(dm.val_dataset))):
-        print(i, dm.val_dataset.files[i][0].parent.stem)
-        # draw_point_clouds(batch[1])
-
-    for i, batch in enumerate(tqdm(iter(dm.train_dataloader()), total=len(dm.train_dataset))):
-        print(i, dm.train_dataset.files[i][0].parent.stem)
-        # draw_point_clouds(batch[1])
-
-    model = VoxelClassifier(
-        in_channels=dm.num_channels,
+    model = MandiblePatchSegModule(
         num_classes=dm.num_classes,
         **config['model'],
     )
@@ -57,7 +47,7 @@ def train():
     )
     metric_checkpoint_callback = ModelCheckpoint(
         save_top_k=3,
-        monitor='iou/val',
+        monitor='f1/val',
         mode='max',
         filename='weights-{epoch:02d}',
     )
@@ -68,7 +58,7 @@ def train():
         devices=1,
         max_epochs=config['model']['epochs'],
         logger=logger,
-        accumulate_grad_batches=4,
+        # accumulate_grad_batches=4,
         gradient_clip_val=35,
         callbacks=[
             epoch_checkpoint_callback,
@@ -78,7 +68,6 @@ def train():
         ],
     )
     trainer.fit(model, datamodule=dm)
-
 
 
 if __name__ == '__main__':

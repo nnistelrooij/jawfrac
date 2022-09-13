@@ -38,13 +38,6 @@ class MandibleSegDataModule(pl.LightningDataModule):
         self,
         stage: str,
         exclude: List[str]=[
-            # OOM
-            'camila-blind-pelican',
-            'fiona-common-gecko',
-            'melisenda-comparative-goldfish',
-            'celestia-experienced-bear',
-            'camila-blind-pelican',
-            'peggy-then-gamefowl',
         ],
     ) -> Union[List[Path], List[Tuple[Path, Path]]]:
         scan_files = sorted(self.root.glob('**/image.nii.gz'))
@@ -101,6 +94,9 @@ class MandibleSegDataModule(pl.LightningDataModule):
 
     def val_dataloader(self) -> DataLoader:
         return self._dataloader(self.val_dataset)
+
+    def test_dataloader(self) -> DataLoader:
+        return self._dataloader(self.test_dataset)
 
     def predict_dataloader(self) -> DataLoader:
         return self._dataloader(self.pred_dataset)

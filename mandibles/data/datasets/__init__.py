@@ -1,1 +1,1 @@
-from mandibles.data.datasets.mandibleseg import MandibleSegDataset
+from mandibles.data.datasets.mandibleseg import MandiblePatchSegDataset

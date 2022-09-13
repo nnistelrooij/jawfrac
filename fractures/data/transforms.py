@@ -84,25 +84,27 @@ class MandibleCrop:
         # find bounding box of largest annotated connected component
         labels, num_labels = ndimage.label(mandible)
         sizes = ndimage.sum_labels(mandible, labels, range(1, num_labels + 1))
-        bbox = ndimage.find_objects(labels == (sizes.argmax() + 1))[0]
+        slices = ndimage.find_objects(labels == (sizes.argmax() + 1))[0]
 
         # determine slices of bounding box after padding
-        slices = ()
+        padded_slices = ()
         padding = np.ceil(self.padding / spacing).astype(int)
-        for s, pad in zip(bbox, padding):
-            slices += (slice(max(s.start - pad, 0), s.stop + pad),)
+        for s, pad in zip(slices, padding):
+            padded_slices += (slice(max(s.start - pad, 0), s.stop + pad),)
+
+        # crop volumes given padded slices
+        for key in ['intensities', 'mandible', 'labels']:
+            if key not in data_dict:
+                continue
+
+            data_dict[key] = data_dict[key][padded_slices]
 
         # determine affine transformation from source to crop
         affine = np.eye(4)
-        affine[:3, 3] -= [s.start for s in slices]
+        affine[:3, 3] -= [s.start for s in padded_slices]
 
-        data_dict['intensities'] = intensities[slices]
-        data_dict['mandible'] = mandible[slices]
         data_dict['spacing'] = spacing
         data_dict['affine'] = affine @ data_dict.get('affine', np.eye(4))
-
-        if 'labels' in data_dict:
-            data_dict['labels'] = data_dict['labels'][slices]
 
         return data_dict
 

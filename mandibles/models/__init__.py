@@ -1,1 +1,1 @@
-from mandibles.models.voxel_classifier import VoxelClassifier
+from mandibles.models.mandiblepatchseg import MandiblePatchSegModule

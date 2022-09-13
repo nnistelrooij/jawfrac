@@ -9,38 +9,26 @@ from miccai.data.datasets.base import MeshDataset
 import mandibles.data.transforms as T
 
 
-class MandibleSegDataset(MeshDataset):
+class MandiblePatchSegDataset(MeshDataset):
     """Dataset to load mandibular CT scans with fracture segmentations."""
-
-    # MEAN = [55.3963, -34.5440, -16.5498]
-    # STD = 20.1196
-    MEAN = [-62.88073436 -62.03004933 -56.87611781]
-    STD = 34.18731546
 
     def __init__(
         self,
         stage: str,
-        foreground_hu_threshold: float,
-        downsample_voxel_size: float,
-        downsample_max_points: int,
+        crop_padding: float,
+        regular_spacing: float,
+        patch_size: int,
+        stride: int,
+        pos_volume_threshold: float,
         **kwargs: Dict[str, Any],
     ) -> None:
         pre_transform = T.Compose(
-            T.ToPointCloud(intensity_thresh=foreground_hu_threshold),
-            T.Rotate('xy', [180, 90]),  # Fabian
-            # T.Rotate('yx', [180, 90]),  # Sophie
-            # T.ZScoreNormalize(self.MEAN, self.STD),
-            T.ZScoreNormalize(),
-            T.IntensityAsFeatures(),
-            T.XYZAsFeatures(),
-            T.PointCloudDownsample(
-                voxel_size=downsample_voxel_size,
-                inplace=stage == 'fit',
-            ),
-            T.NearestNeighborCrop(
-                neigbors=downsample_max_points,
-                seed_fn=lambda points: points[:, 2].argmax(),
-            ) if stage == 'fit' else dict,
+            T.NonNegativeCrop(padding=crop_padding),
+            T.RegularSpacing(spacing=regular_spacing),
+            T.NaturalHeadPositionOrient(),
+            T.PatchIndices(patch_size=patch_size, stride=stride),
+            T.PositiveNegativePatchIndices(volume_thresh=pos_volume_threshold)
+            if stage == 'fit' else dict,
         )
 
         super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)
@@ -54,17 +42,18 @@ class MandibleSegDataset(MeshDataset):
 
         return {
             'intensities': intensities,
-            'affine': img.affine,
-            'shape': np.array(intensities.shape),
+            'spacing': np.array(img.header.get_zooms()),
+            'orientation': nibabel.io_orientation(img.affine),
+            'shape': np.array(img.header.get_data_shape()),
         }
 
     def load_annotation(
         self,
         file: Path,
-    ) -> Dict[str, NDArray[np.int64]]:
+    ) -> Dict[str, NDArray[np.uint16]]:
         seg = nibabel.load(self.root / file)
-        labels = np.asarray(seg.dataobj, dtype=np.int16)
+        labels = np.asarray(seg.dataobj)
 
         return {
-            'labels': labels,
+            'labels': (labels == 2).astype(np.int16),
         }

@@ -14,6 +14,7 @@ class JawFracDataset(MeshDataset):
 
     def __init__(
         self,
+        stage: str,
         mandible_crop_padding: float,
         regular_spacing: float,
         patch_size: int,
@@ -23,7 +24,7 @@ class JawFracDataset(MeshDataset):
         **kwargs: Dict[str, Any],
     ) -> None:
         pre_transform = T.Compose(
-            T.MandibleCrop(padding=mandible_crop_padding),
+            # T.MandibleCrop(padding=mandible_crop_padding),
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
             T.PatchIndices(patch_size=patch_size, stride=stride),
@@ -31,9 +32,18 @@ class JawFracDataset(MeshDataset):
                 intensity_thresh=bone_hu_threshold,
                 volume_thresh=bone_volume_threshold,
             ),
+            *((
+                T.ForegroundPatchIndices(patch_size=patch_size * 3 // 2),
+                T.NegativePatchIndices(),
+                T.ExpandLabel(
+                    fg_iters=1,
+                    all_iters=1,
+                    fg_intensity_thresh=bone_hu_threshold,
+                ),
+            ) if stage == 'fit' else ()),
         )
 
-        super().__init__(pre_transform=pre_transform, **kwargs)
+        super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)
 
     def load_scan(
         self,

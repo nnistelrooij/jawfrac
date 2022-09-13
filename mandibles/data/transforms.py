@@ -1,242 +1,287 @@
+from itertools import product
 from typing import Any, Dict
 
+import nibabel
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 from scipy import ndimage
-from scipy.spatial.transform import Rotation
 
 from miccai.data.transforms import *
 
 
-class ToPointCloud:
+class NonNegativeCrop:
 
     def __init__(
         self,
-        intensity_thresh: float=500,
-        component_thresh: int=1000,
+        padding: Union[float, ArrayLike],
     ) -> None:
-        self.intensity_thresh = intensity_thresh
-        self.component_thresh = component_thresh
+        self.padding = padding
 
     def __call__(
         self,
         intensities: NDArray[Any],
-        affine: NDArray[Any],
+        spacing: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        # only keep voxels with sufficient HU intensity
-        mask = intensities >= self.intensity_thresh
+        # find smallest bounding box that encapsulates all non-negative voxels
+        slices = ndimage.find_objects(intensities >= 0)[0]
 
-        # remove small connected components
-        label_idxs, _ = ndimage.label(mask)
-        _, inverse, counts = np.unique(
-            label_idxs, return_inverse=True, return_counts=True,
-        )
-
-        small_components = counts < self.component_thresh
-        mask[small_components[inverse.reshape(mask.shape)]] = False
-
-        if 'labels' in data_dict:
-            labels = data_dict['labels']
-
-            # dilate label to compensate for under-segmentations
-            for idx in range(1, labels.max() + 1):
-                binary_labels = ndimage.binary_dilation(
-                    input=labels == idx,
-                    structure=ndimage.generate_binary_structure(3, 3),
-                    iterations=2,
-                    mask=mask & (labels == 0),
-                )
-                labels[binary_labels] = idx
-
-            # remove small connected components from background
-            label_idxs, _ = ndimage.label(mask & (labels == 0))
-            _, inverse, counts = np.unique(
-                label_idxs, return_inverse=True, return_counts=True,
-            )
-
-            small_components = counts < self.component_thresh
-            mask[small_components[inverse.reshape(mask.shape)]] = False
-
-            # save labels of remaining voxels as COO features
-            data_dict['labels'] = labels[mask]      
+        # determine slices of bounding box after padding
+        padded_slices = ()
+        padding = np.ceil(self.padding / spacing).astype(int)
+        for s, pad in zip(slices, padding):
+            padded_slices += (slice(max(s.start - pad, 0), s.stop + pad),)
         
-        # compute subject-centered coordinates of remaining voxels
-        coords = np.column_stack(mask.nonzero())
-        coords = np.einsum('kj,ij->ki', coords, affine[:3, :3])
+        # crop volumes given padded slices
+        data_dict['intensities'] = intensities[padded_slices]
+        if 'labels' in data_dict:
+            data_dict['labels'] = data_dict['labels'][padded_slices]
 
-        affine[:3, 3] = 0
+        # determine affine transformation from source to crop
+        affine = np.eye(4)
+        affine[:3, 3] -= [s.start for s in padded_slices]
 
-        data_dict['intensities'] = intensities[mask]
-        data_dict['affine'] = affine
-        data_dict['points'] = coords
-        data_dict['point_count'] = coords.shape[0]
+        data_dict['spacing'] = spacing
+        data_dict['affine'] = affine @ data_dict.get('affine', np.eye(4))
 
         return data_dict
 
     def __repr__(self) -> str:
         return '\n'.join([
             self.__class__.__name__ + '(',
-            f'    intensity_thresh={self.intensity_thresh},',
-            f'    component_thresh={self.component_thresh},',
+            f'    padding={self.padding},',
+            ')',
+        ])
+
+    
+class RegularSpacing:
+
+    def __init__(
+        self,
+        spacing: Union[float, ArrayLike],
+    ) -> None:
+        if isinstance(spacing, float):
+            spacing = [spacing]*3
+
+        self.spacing = np.array(spacing)
+
+    def __call__(
+        self,
+        spacing: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        # compute how much bigger results should be
+        zoom = spacing / self.spacing
+
+        # interpolate the inputs to have regular voxel spacing
+        data_dict['intensities'] = ndimage.zoom(data_dict['intensities'], zoom)
+        if 'labels' in data_dict:
+            data_dict['labels'] = ndimage.zoom(data_dict['labels'], zoom)
+            data_dict['labels'] = (data_dict['labels'] >= 1).astype(np.int16)
+
+        # determine affine transformation from input to result
+        affine = np.eye(4)
+        affine[np.diag_indices(3)] = zoom
+
+        data_dict['spacing'] = self.spacing
+        data_dict['affine'] = affine @ data_dict.get('affine', np.eye(4))
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    spacing={self.spacing},',
             ')',
         ])
 
 
-class Rotate:
-
-    def __init__(
-        self,
-        axes: str,
-        degrees: List[float],
-    ) -> None:
-        rot = np.eye(4)
-        rot[:-1, :-1] = Rotation.from_euler(
-            seq=axes, angles=degrees, degrees=True,
-        ).as_matrix()
-
-        self.axes = axes
-        self.degrees = degrees
-        self.rot_matrix = rot
+class NaturalHeadPositionOrient:
 
     def __call__(
         self,
-        points: NDArray[Any],
+        orientation: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        points = np.einsum('kj,ij->ki', points, self.rot_matrix[:3, :3])
-        affine = self.rot_matrix @ data_dict.get('affine', np.eye(4))
-        
-        data_dict['points'] = points
-        data_dict['affine'] = affine
+        # reorient volumes to standard basis
+        for key in ['intensities', 'labels']:
+            if key not in data_dict:
+                continue
+
+            shape = data_dict[key].shape
+            data_dict[key] = nibabel.apply_orientation(
+                arr=data_dict[key],
+                ornt=orientation,
+            )
+
+        # determine affine transformation from input to result
+        affine = nibabel.orientations.inv_ornt_aff(
+            ornt=orientation,
+            shape=shape,
+        )
+        affine = np.linalg.inv(affine)
+
+        data_dict['orientation'] = nibabel.io_orientation(affine=np.eye(4))
+        data_dict['affine'] = affine @ data_dict.get('affine', np.eye(4))
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return self.__class__.__name__ + '()'
+
+
+class PatchIndices:
+
+    def __init__(
+        self,
+        patch_size: int,
+        stride: int,
+    ) -> None:
+        self.patch_size = patch_size
+        self.stride = stride
+
+    def __call__(
+        self,
+        intensities: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        # determine start indices of patches along each dimension
+        start_idxs = []
+        for dim_size in intensities.shape:
+            dim_idxs = list(range(0, dim_size - self.patch_size, self.stride))
+            dim_idxs = np.array(dim_idxs + [dim_size - self.patch_size])
+
+            start_idxs.append(dim_idxs)
+
+        # determine start and stop indices of patches in all dimensions
+        start_idxs = np.stack(list(product(*start_idxs)))
+        stop_idxs = start_idxs + self.patch_size
+        patch_idxs = np.dstack((start_idxs, stop_idxs))
+
+        data_dict['intensities'] = intensities
+        data_dict['patch_idxs'] = patch_idxs
 
         return data_dict
 
     def __repr__(self) -> str:
         return '\n'.join([
             self.__class__.__name__ + '(',
-            f'    axes={self.axes},',
-            f'    degrees={self.degrees},',
-            ')'
+            f'    patch_size={self.patch_size},',
+            f'    stride={self.stride},',
+            ')',
+        ])
+
+
+class PositiveNegativePatchIndices:
+
+    def __init__(
+        self,
+        volume_thresh: float=0.05,
+    ) -> None:
+        self.volume_thresh = volume_thresh
+
+    def __call__(
+        self,
+        labels: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        pos_patch_idxs, neg_patch_idxs = [], []
+        for patch_idxs in data_dict['patch_idxs']:
+            # extract a patch from the volume
+            slices = tuple(slice(start, stop) for start, stop in patch_idxs)
+            patch = labels[slices]
+            
+            # determine if patch contains sufficient foreground voxels
+            if patch.mean() >= self.volume_thresh:
+                pos_patch_idxs.append(patch_idxs)
+            else:
+                neg_patch_idxs.append(patch_idxs)
+
+        data_dict['pos_patch_idxs'] = np.stack(pos_patch_idxs)
+        data_dict['neg_patch_idxs'] = np.stack(neg_patch_idxs)
+        data_dict['labels'] = labels
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    pos_volume_thresh={self.volume_thresh},',
+            ')',
         ])
 
 
 class IntensityAsFeatures:
 
-    def __init__(
-        self,
-        level: float=450.0,
-        width: float=1100.0,
-        low: float=-1.0,
-        high: float=1.0,
-    ) -> None:
-        self.min = level - width / 2
-        self.max = level + width / 2
-        self.low = low
-        self.range = high - low
-
     def __call__(
         self,
         intensities: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        data_dict['intensities'] = intensities
-        
-        intensities = intensities.clip(self.min, self.max)
-        intensities = (intensities - self.min) / (self.max - self.min)
-        intensities = (intensities * self.range) + self.low
-
         if 'features' in data_dict:
-            data_dict['features'] = np.column_stack(
-                (data_dict['features'], intensities),
+            data_dict['features'] = np.concatenate(
+                (data_dict['features'], intensities[np.newaxis].astype(float)),
             )
         else:
-            data_dict['features'] = intensities[:, np.newaxis]
+            data_dict['features'] = intensities[np.newaxis].astype(float)
+
+        data_dict['intensities'] = intensities
 
         return data_dict
 
     def __repr__(self) -> str:
-        return '\n'.join([
-            self.__class__.__name__ + '(',
-            f'    level={(self.min + self.max) / 2},',
-            f'    width={self.max - self.min},',
-            f'    low={self.low},',
-            f'    high={self.low + self.range},',
-            ')',
-        ])
+        return self.__class__.__name__ + '()'
 
 
-class NearestNeighborCrop:
+class PositiveNegativePatches:
 
     def __init__(
         self,
-        neigbors: int,
-        seed_fn=lambda points: np.random.randint(points.shape[0]),
-    ) -> None:
-        self.neigbors = neigbors
-        self.seed_fn = seed_fn
-
-    def __call__(
-        self,
-        points: NDArray[Any],
-        point_count: int,
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        if point_count <= self.neigbors:
-            data_dict['points'] = points
-            data_dict['point_count'] = point_count
-
-            return data_dict
-
-        seed = self.seed_fn(points)
-        rel_coords = points - points[seed]
-        sq_dists = np.sum(rel_coords ** 2, axis=-1)
-        crop_idxs = np.argsort(sq_dists)[:self.neigbors]
-
-        data_dict['points'] = points[crop_idxs]
-        data_dict['point_count'] = crop_idxs.shape[0]
-        
-        for key in ['features', 'labels', 'instances']:
-            if key not in data_dict:
-                continue
-
-            data_dict[key] = data_dict[key][crop_idxs]
-
-        return data_dict
-
-    def __repr__(self) -> str:
-        return '\n'.join([
-            self.__class__.__name__ + '(',
-            f'    neighbors={self.neigbors},',
-            ')',
-        ])
-        
-
-class RandomTranslate:
-
-    def __init__(
-        self,
-        max_dist: Union[float, ArrayLike],
+        max_patches: int,
         rng: Optional[np.random.Generator]=None,
     ) -> None:
-        self.max = max_dist
+        self.max_pos_patches = max_patches // 2
         self.rng = rng if rng is not None else np.random.default_rng()
 
     def __call__(
         self,
-        points: NDArray[Any],
+        features: NDArray[np.float64],
+        labels: NDArray[Any],
+        pos_patch_idxs: NDArray[np.int64],
+        neg_patch_idxs: NDArray[np.int64],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        trans = self.rng.random(size=3)
-        trans = (trans * 2 * self.max) - self.max
+        # sample at most self.max_pos_patches positive patches from scan
+        pos_patch_idxs = self.rng.permutation(pos_patch_idxs)
+        pos_patch_idxs = pos_patch_idxs[:self.max_pos_patches]
 
-        data_dict['points'] = points + trans
+        # sample as many negative patches as positive patches
+        neg_patch_idxs = self.rng.permutation(neg_patch_idxs)
+        neg_patch_idxs = neg_patch_idxs[:pos_patch_idxs.shape[0]]
+
+        patch_idxs = np.concatenate((pos_patch_idxs, neg_patch_idxs))
+
+        # crop patches from volumes
+        feature_patches, label_patches = [], []
+        for patch_idxs in patch_idxs:
+            slices = tuple(slice(start, stop) for start, stop in patch_idxs)
+            label_patch = labels[slices]
+            label_patches.append(label_patch)
+
+            slices = (slice(None),) + slices
+            feature_patches.append(features[slices])
+
+        # stack patches to make batch
+        data_dict['features'] = np.stack(feature_patches)
+        data_dict['labels'] = np.stack(label_patches)
+        data_dict['pos_patch_idxs'] = pos_patch_idxs
+        data_dict['neg_patch_idxs'] = neg_patch_idxs
 
         return data_dict
 
     def __repr__(self) -> str:
         return '\n'.join([
             self.__class__.__name__ + '(',
-            f'    max={self.max},',
+            f'    max_patches={2 * self.max_pos_patches},',
             ')',
         ])

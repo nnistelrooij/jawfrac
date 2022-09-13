@@ -1,4 +1,4 @@
-work_dir: '/home/mka3dlab/Documents/logs/patchseg'
+work_dir: '/home/mka3dlab/Documents/logs/mandibles'
 version: 9
 seed: 0
 
@@ -8,18 +8,19 @@ model:
   epochs: 500
   warmup_epochs: 20
   weight_decay: 0
+  num_awms: 3
 
 datamodule:
-  root: '/home/mka3dlab/Documents/fractures/jawfrac'
+  root: '/mnt/diag/nielsvannistelrooij/Fabian_clean'
   regex_filter: ''
   val_size: 0.2
-  batch_size: 4
+  batch_size: 1
   num_workers: 1
   pin_memory: True
   persistent_workers: True
-  mandible_crop_padding: 5  # mm
-  regular_spacing: 0.4  # mm
+  crop_padding: 5  # mm
+  regular_spacing: 0.5  # mm
   patch_size: 64
   stride: 48
-  bone_hu_threshold: 500
-  bone_volume_threshold: 0.01
+  max_patches_per_scan: 4
+  pos_volume_threshold: 0.05

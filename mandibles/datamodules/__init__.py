@@ -1,2 +1,2 @@
 from mandibles.datamodules.mandibleseg import MandibleSegDataModule
-from mandibles.datamodules.mandiblesemseg import MandibleSemSegDataModule
+from mandibles.datamodules.mandiblepatchseg import MandiblePatchSegDataModule
