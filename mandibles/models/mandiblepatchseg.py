@@ -1,10 +1,13 @@
 from typing import Any, Dict, List, Tuple
 
+import numpy as np
 import pytorch_lightning as pl
+from scipy import ndimage
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 from torchmetrics import ConfusionMatrix, F1Score
 from torchtyping import TensorType
+from torch_scatter import scatter_mean
 
 import mandibles.nn as nn
 from miccai import PointTensor
@@ -86,14 +89,14 @@ class MandiblePatchSegModule(pl.LightningModule):
         batch_size: int=24,
     ) -> TensorType['D', 'H', 'W', torch.float32]:
         # out = torch.zeros_like(features[0])
-        out = torch.full_like(features[0], float('inf'))
+        out = torch.full_like(features[0], -float('inf'))
 
         patch_slices = []
         for patch_idxs in patch_idxs:
             slices = tuple(slice(start, stop) for start, stop in patch_idxs)
             patch_slices.append(slices)
 
-        for i in range(0, patch_idxs.shape[0], batch_size):
+        for i in range(0, len(patch_slices), batch_size):
             # extract batch of patches from features volume
             x = []
             for slices in patch_slices[i:i + batch_size]:
@@ -124,15 +127,72 @@ class MandiblePatchSegModule(pl.LightningModule):
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)
-        mask = x < 0.4
+        mask = x > 0.5
 
         # compute metrics
-        self.f1(mask.long().flatten(), (target > 0).long().flatten())
-        self.recall(mask, target)
+        self.f1(mask.long().flatten(), target.flatten())
         
         # log metrics
         self.log('f1/test', self.f1)
-        self.log('recall/test', self.recall)
+
+    def filter_connected_components(
+        self,
+        probs: TensorType['D', 'H', 'W', torch.float32],
+    ) -> TensorType['D', 'H', 'W', torch.bool]:
+        # determine connected components in volume
+        fg_mask = probs > 0.75
+        labels, _ = ndimage.label(
+            input=fg_mask.cpu().numpy(),
+            structure=ndimage.generate_binary_structure(3, 1),
+        )
+        labels = torch.tensor(labels, dtype=torch.int64, device=probs.device)
+
+        # determine components comprising at least 1200 voxels
+        _, inverse, counts = torch.unique(
+            labels, return_inverse=True, return_counts=True,
+        )
+        count_mask = counts >= 32_000
+
+        # determine components with mean confidence at least 0.75
+        component_probs = scatter_mean(
+            src=probs.flatten(),
+            index=labels.flatten(),
+        )
+        prob_mask = component_probs >= 0.8
+
+        # project masks back to volume
+        component_mask = count_mask & prob_mask
+        volume_mask = component_mask[inverse]
+
+        print(component_mask.sum())
+
+        return volume_mask
+
+    def fill_volume(
+        self,
+        mask: TensorType['D', 'H', 'W', torch.bool],
+        affine: TensorType[4, 4, torch.float32],
+        shape: TensorType[3, torch.int64],
+    ) -> TensorType['D', 'H', 'W', torch.bool]:
+        # compute voxel indices into source volume
+        voxels = mask.nonzero().float()
+        hom_voxels = torch.column_stack((voxels, torch.ones_like(voxels[:, 0])))
+
+        orig_voxels = torch.einsum('ij,kj->ki', torch.linalg.inv(affine), hom_voxels)
+        orig_voxels = orig_voxels[:, :3].round().long()
+
+        # initialize empty volume and fill with binary segmentation
+        out = torch.zeros(shape.tolist(), dtype=torch.int64)
+        out[tuple(orig_voxels.T)] = 1
+
+        # dilate volume to fill empty space between foreground voxels
+        out = ndimage.binary_dilation(
+            input=out,
+            structure=ndimage.generate_binary_structure(3, 2),
+            iterations=3,
+        )
+
+        return torch.tensor(out)
 
     def predict_step(
         self,
@@ -143,42 +203,21 @@ class MandiblePatchSegModule(pl.LightningModule):
             TensorType[3, torch.int64],
         ],
         batch_idx: int,
-    ) -> TensorType['P', torch.float32]:
+    ) -> TensorType['D', 'H', 'W', torch.bool]:
+        if batch_idx == 3:
+            k = 3
         features, patch_idxs, affine, shape = batch
 
         # predict binary segmentation
-        x = self.predict_volume(features, patch_idxs)
-        y = x < 0.9
+        probs = self.predict_volume(features, patch_idxs)
 
-        # compute voxel indices into source volume
-        voxels = y.nonzero().float()
-        hom_voxels = torch.column_stack((voxels, torch.ones_like(voxels[:, 0])))
+        # remove small or low-confidence connected components
+        fg_mask = self.filter_connected_components(probs)
 
-        orig_voxels = torch.einsum('ij,kj->ki', torch.linalg.inv(affine), hom_voxels)
-        orig_voxels = orig_voxels[:, :3].round().long()
+        # fill volume with original shape given foreground mask
+        out = self.fill_volume(fg_mask, affine, shape)
 
-        # initialize empty volume and fill with binary segmentation
-        out = torch.zeros(shape.tolist(), dtype=int)
-        out[tuple(orig_voxels.T)] = 1
-
-        # cluster foreground voxels with DBSCAN
-        pt = PointTensor(coordinates=voxels)
-        cluster_idxs = pt.cluster(
-            max_neighbor_dist=10.0,
-            min_points=100,
-            return_index=True,
-        )
-
-        # determine clusters with at least 1200 voxels
-        _, inverse, counts = torch.unique(
-            cluster_idxs, return_inverse=True, return_counts=True,
-        )        
-        frac_mask = (cluster_idxs != -1) & (counts >= 1200)[inverse]
-
-        # fill volume with large clusters
-        out[tuple(orig_voxels[frac_mask].T)] = 2
-
-        return x
+        return out
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],

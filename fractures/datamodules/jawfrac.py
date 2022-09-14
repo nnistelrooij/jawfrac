@@ -44,7 +44,7 @@ class JawFracDataModule(pl.LightningDataModule):
         files = [f for f in files if f.parent.name not in exclude]
         files = [f.relative_to(self.root) for f in files]
 
-        return files        
+        return files
 
     def _files(
         self,

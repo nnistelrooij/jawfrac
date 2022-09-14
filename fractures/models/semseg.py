@@ -180,7 +180,7 @@ class SemSegModule(pl.LightningModule):
         # fill volume with large clusters
         out[tuple(orig_voxels[frac_mask].T)] = 2
 
-        return x
+        return out
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],

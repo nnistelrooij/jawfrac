@@ -67,8 +67,8 @@ class GrayscaleAdaptivePerceptionModule(nn.Module):
         self,
         num_awms: int=3,
         awm_channels: int=16,
-        init_level: float=450.0,
-        init_width: float=1100.0,
+        init_level: float=450.0,  # 40.5,
+        init_width: float=1100.0,  # 350.0,
     ) -> None:
         super().__init__()
 

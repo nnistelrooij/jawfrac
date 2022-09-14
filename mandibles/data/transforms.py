@@ -218,19 +218,104 @@ class IntensityAsFeatures:
         intensities: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
+        data_dict['intensities'] = intensities
+
+        intensities = intensities.clip(-1024, 3071).astype(float)
+
         if 'features' in data_dict:
             data_dict['features'] = np.concatenate(
-                (data_dict['features'], intensities[np.newaxis].astype(float)),
+                (data_dict['features'], intensities[np.newaxis]),
             )
         else:
-            data_dict['features'] = intensities[np.newaxis].astype(float)
+            data_dict['features'] = intensities[np.newaxis]
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return self.__class__.__name__ + '()'
+
+
+class RandomPatchTranslate:
+
+    def __init__(
+        self,
+        max_voxels: int,
+        rng: Optional[np.random.Generator]=None,
+    ) -> None:
+        self.max = max_voxels
+        self.rng = rng if rng is not None else np.random.default_rng()
+
+    def __call__(
+        self,
+        intensities: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        for key in data_dict:
+            if 'patch_idxs' not in key:
+                continue
+
+            # sample random translations
+            patch_idxs = data_dict[key]
+            trans = self.rng.integers(
+                low=-self.max,
+                high=self.max + 1,
+                size=patch_idxs.shape[:2] + (1,),
+            )
+
+            # ensure resulting patches are contained in volume
+            start_idxs, stop_idxs = (patch_idxs + trans).transpose(2, 0, 1)
+            diff = (
+                np.maximum(start_idxs, 0) - start_idxs
+                +
+                np.minimum(intensities.shape, stop_idxs) - stop_idxs
+            ).reshape(trans.shape)
+
+            # apply translations to patch indices
+            data_dict[key] = patch_idxs + trans + diff
 
         data_dict['intensities'] = intensities
 
         return data_dict
 
     def __repr__(self) -> str:
-        return self.__class__.__name__ + '()'
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    max_voxels={self.max},',
+            ')',
+        ])
+
+
+class RandomXAxisFlip:
+
+    def __init__(
+        self,
+        p: float=0.5,
+        rng: Optional[np.random.Generator]=None,
+    ) -> None:
+        self.p = p
+        self.rng = rng if rng is not None else np.random.default_rng()
+
+    def __call__(
+        self,
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if self.rng.random() >= self.p:
+            return data_dict
+
+        for key in ['intensities', 'labels']:
+            if key not in data_dict:
+                continue
+
+            data_dict[key] = np.flip(data_dict[key], axis=0)
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    p={self.p},',
+            ')',
+        ])
 
 
 class PositiveNegativePatches:

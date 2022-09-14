@@ -17,7 +17,6 @@ def train():
     dm = MandiblePatchSegDataModule(
         seed=config['seed'], **config['datamodule'],
     )
-    dm.setup('fit')
 
     model = MandiblePatchSegModule(
         num_classes=dm.num_classes,

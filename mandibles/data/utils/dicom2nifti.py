@@ -8,6 +8,7 @@ import nibabel
 import numpy as np
 from numpy.typing import NDArray
 import pydicom
+from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
 
@@ -211,6 +212,16 @@ def write_nifti(
     filename: str,
     affine: NDArray[np.float32],
 ) -> None:
+    # compute coordinate transformation from DICOM to NIfTI
+    reflect = np.eye(4)
+    reflect[np.diag_indices(2)] = -1
+
+    rot = np.eye(4)
+    rot[:3, :3] = Rotation.from_euler('xz', [90, 90], degrees=True).as_matrix()
+
+    affine = rot @ reflect @ affine
+
+    # save NIfTI to storage
     img = nibabel.Nifti1Image(img, affine)
     nibabel.save(img, filename)
 
@@ -274,6 +285,7 @@ def remove_nifti_files(root: Path) -> None:
 
 def write_nifti_files(root: Path) -> None:    
     dirs = sorted([p for p in root.glob('*') if p.is_dir()])
+    dirs = dirs[250:]
     dir_iter = tqdm(p.imap(convert_case, dirs), total=len(dirs))
     for i, dir_path in enumerate(dir_iter):
 

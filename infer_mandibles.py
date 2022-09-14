@@ -2,24 +2,23 @@ import pytorch_lightning as pl
 import yaml
 from tqdm import tqdm
 
-from mandibles.datamodules import MandibleSemSegDataModule
-from mandibles.models import VoxelClassifier
+from mandibles.datamodules import MandiblePatchSegDataModule
+from mandibles.models import MandiblePatchSegModule
 import nibabel
 import numpy as np
 
 
 def infer():
-    with open('mandibles/config/semseg.yaml', 'r') as f:
+    with open('mandibles/config/patchseg.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     config['datamodule']['batch_size'] = 1
-    dm = MandibleSemSegDataModule(
+    dm = MandiblePatchSegDataModule(
         seed=config['seed'], **config['datamodule'],
     )
 
-    model = VoxelClassifier.load_from_checkpoint(
-        'checkpoints/mandible4.ckpt',
-        in_channels=dm.num_channels,
+    model = MandiblePatchSegModule.load_from_checkpoint(
+        'checkpoints/mandibles.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )
@@ -33,12 +32,13 @@ def infer():
 
     for i, volume in enumerate(tqdm(preds, desc='Writing NIfTI files')):
         # get original scan
-        path = dm.root / dm.pred_dataset.files[i]
+        path = dm.root / dm.predict_dataset.files[i]
         img = nibabel.load(path)
         affine = img.affine
 
         # save to storage
-        img = nibabel.Nifti1Image(volume.astype(np.uint16), affine)
+        volume = volume.cpu().numpy().astype(np.uint16)
+        img = nibabel.Nifti1Image(volume, affine)
         nibabel.save(img, path.parent / 'mandible.nii.gz')
 
 

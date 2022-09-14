@@ -1,6 +1,6 @@
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import pytorch_lightning as pl
 from sklearn.model_selection import ShuffleSplit
@@ -34,24 +34,30 @@ class MandibleSegDataModule(pl.LightningDataModule):
         self.seed =  seed
         self.dataset_cfg = dataset_cfg
 
+    def _filter_files(
+        self,
+        pattern: str,
+        exclude: List[str]=[],
+    ) -> List[Path]:
+        files = sorted(self.root.glob(pattern))
+        files = [f for f in files if re.search(self.filter, str(f))]
+        files = [f for f in files if f.parent.name not in exclude]
+        files = [f.relative_to(self.root) for f in files]
+
+        return files
+
     def _files(
         self,
         stage: str,
         exclude: List[str]=[
         ],
     ) -> Union[List[Path], List[Tuple[Path, Path]]]:
-        scan_files = sorted(self.root.glob('**/image.nii.gz'))
-        scan_files = [f for f in scan_files if re.search(self.filter, str(f))]
-        scan_files = [f for f in scan_files if f.parent.name not in exclude]
-        scan_files = [f.relative_to(self.root) for f in scan_files]
+        scan_files = self._filter_files('**/image.nii.gz')
 
         if stage == 'predict':
-            return scan_files
+            return scan_files[:5]
 
-        ann_files = sorted(self.root.glob('**/seg.nii.gz'))
-        ann_files = [f for f in ann_files if re.search(self.filter, str(f))]
-        ann_files = [f for f in ann_files if f.parent.name not in exclude]
-        ann_files = [f.relative_to(self.root) for f in ann_files]
+        ann_files = self._filter_files('**/seg.nii.gz')
         
         return list(zip(scan_files, ann_files))
 
@@ -77,6 +83,7 @@ class MandibleSegDataModule(pl.LightningDataModule):
     def _dataloader(
         self,
         dataset: Dataset,
+        collate_fn: Callable[..., Dict[str, Any]],
         shuffle: bool=False,
     ) -> DataLoader:
         return DataLoader(
@@ -84,19 +91,21 @@ class MandibleSegDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=shuffle,
             num_workers=self.num_workers,
-            collate_fn=self.collate_fn,
+            collate_fn=collate_fn,
             pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers,
         )
 
     def train_dataloader(self) -> DataLoader:
-        return self._dataloader(self.train_dataset, shuffle=True)
+        return self._dataloader(
+            self.train_dataset, self.fit_collate_fn, shuffle=True,
+        )
 
     def val_dataloader(self) -> DataLoader:
-        return self._dataloader(self.val_dataset)
+        return self._dataloader(self.val_dataset, self.fit_collate_fn)
 
     def test_dataloader(self) -> DataLoader:
-        return self._dataloader(self.test_dataset)
+        return self._dataloader(self.test_dataset, self.test_collate_fn)
 
     def predict_dataloader(self) -> DataLoader:
-        return self._dataloader(self.pred_dataset)
+        return self._dataloader(self.predict_dataset, self.predict_collate_fn)
