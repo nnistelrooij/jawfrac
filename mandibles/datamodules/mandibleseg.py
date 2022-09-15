@@ -2,6 +2,7 @@ from pathlib import Path
 import re
 from typing import Any, Callable, Dict, List, Tuple, Union
 
+import pandas as pd
 import pytorch_lightning as pl
 from sklearn.model_selection import ShuffleSplit
 from torch.utils.data import DataLoader, Dataset
@@ -44,6 +45,15 @@ class MandibleSegDataModule(pl.LightningDataModule):
         files = [f for f in files if f.parent.name not in exclude]
         files = [f.relative_to(self.root) for f in files]
 
+        if not (self.root / 'Fabian overview.csv').exists():
+            return files
+
+        df = pd.read_csv(self.root / 'Fabian overview.csv')
+        df = df.sort_values(by='Pseudonym')
+        df = df[pd.isna(df['Note']) & ~pd.isna(df['Complete'])]
+        df = df[~df['Complete'].str.match(r'.*[,+]')]
+        files = [files[i] for i in df.index]
+
         return files
 
     def _files(
@@ -52,10 +62,11 @@ class MandibleSegDataModule(pl.LightningDataModule):
         exclude: List[str]=[
         ],
     ) -> Union[List[Path], List[Tuple[Path, Path]]]:
-        scan_files = self._filter_files('**/image.nii.gz')
+        # scan_files = self._filter_files('**/image.nii.gz')
+        scan_files = self._filter_files('**/*main*.nii.gz')
 
         if stage == 'predict':
-            return scan_files[:5]
+            return scan_files[70:90]
 
         ann_files = self._filter_files('**/seg.nii.gz')
         
@@ -65,9 +76,10 @@ class MandibleSegDataModule(pl.LightningDataModule):
         self,
         files: List[Tuple[Path, Path]],
     ) -> Tuple[List[Tuple[Path, Path]]]:
-        if self.val_size == 0.0:
+        val_files = len(files) * self.val_size
+        if val_files < 1:
             return files, []
-        elif self.val_size == 1.0:
+        elif val_files > len(files) - 1:
             return [], files
     
         ss = ShuffleSplit(

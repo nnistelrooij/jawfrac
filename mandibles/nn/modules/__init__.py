@@ -1,1 +1,1 @@
-from mandibles.nn.modules.unet import FocalLoss, MandibleNet
+from mandibles.nn.modules.unet import MandibleLoss, MandibleNet

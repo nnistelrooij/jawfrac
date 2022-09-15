@@ -1,4 +1,4 @@
-from typing import List
+from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -34,12 +34,15 @@ class FracNet(nn.Module):
 
     def forward(
         self,
-        x: TensorType['B', 'C', 'H', 'W', 'D', torch.float32],
-    ) -> TensorType['B', 'C', 'H', 'W', 'D', torch.float32]:
+        x: TensorType['B', 'C', 'D', 'H', 'W', torch.float32],
+    ) -> Tuple[
+        TensorType['B', 'C', 'D', 'H', 'W', torch.float32],
+        TensorType['B', 'C', 'D', 'H', 'W', torch.float32],
+    ]:
         xs = self.encoder(x)
         x = self.decoder(xs)
 
-        return x
+        return xs[0], x
 
 
 class MandibleNet(nn.Module):
@@ -61,14 +64,24 @@ class MandibleNet(nn.Module):
             channels_list=channels_list,
         )
 
+        self.loc_head = nn.Linear(64, 3)
+        self.seg_head = nn.Conv3d(32, num_classes, 3, padding=1)
+
     def forward(
         self,
         x: TensorType['B', 1, 'D', 'H', 'W', torch.float32],
-    ) -> TensorType['B', 'C', 'D', 'H', 'W', torch.float32]:
+    ) -> Tuple[
+        TensorType['B', 3, torch.float32],
+        TensorType['B', 'C', 'D', 'H', 'W', torch.float32],
+    ]:
         x = self.gapm(x)
-        x = self.unet(x)
+        encoding, x = self.unet(x)
 
-        return x
+        embedding = encoding.mean(axis=(2, 3, 4))
+        coords = self.loc_head(embedding)
+        seg = self.seg_head(x)
+
+        return coords, seg.squeeze(dim=1)
 
 
 class Encoder(nn.Module):
@@ -116,8 +129,6 @@ class Decoder(nn.Module):
                 ConvTransposeBlock(channels_list[i + 1], channels_list[i + 2], 3),
             ))
 
-        self.head = nn.Conv3d(channels_list[-2], num_classes, 3, padding=1)
-
     def forward(
         self,
         xs: List[TensorType['B', 'C', 'H', 'W', 'D', torch.float32]],
@@ -127,13 +138,11 @@ class Decoder(nn.Module):
         for layer, skip_x in zip(self.layers, xs[1:]):
             x = layer(x)
             x = torch.cat((x, skip_x), dim=1)
-
-        x = self.head(x)
-
-        return x.squeeze(1)
+            
+        return x
 
 
-class FocalLoss(nn.Module):
+class MandibleLoss(nn.Module):
 
     def __init__(
         self,
@@ -145,17 +154,37 @@ class FocalLoss(nn.Module):
         self.alpha = alpha
         self.gamma = gamma
         self.bce = nn.BCEWithLogitsLoss(reduction='none')
+        self.smooth_l1 = nn.SmoothL1Loss()
 
     def forward(
         self,
-        x: TensorType['B', 'D', 'H', 'W', torch.float32],
-        y: TensorType['B', 'D', 'H', 'W', torch.int64],
-    ) -> TensorType[torch.float32]:
-        bce_loss = self.bce(x, y.float())
+        coords: TensorType['B', 3, torch.float32],
+        seg: TensorType['B', 'D', 'H', 'W', torch.float32],
+        y: Tuple[
+            TensorType['B', 3, torch.float32],
+            TensorType['B', 'D', 'H', 'W', torch.int64],
+        ],
+    ) -> Tuple[
+        TensorType[torch.float32],
+        Dict[str, TensorType[torch.float32]],
+    ]:
+        y_coords, y_seg = y
 
-        probs = torch.sigmoid(x)
-        pt = y * probs + (1 - y) * (1 - probs)
-        alphat = y * self.alpha + (1 - y) * (1 - self.alpha)
-        bce_loss *= alphat * (1 - pt) ** self.gamma
+        coords_loss = self.smooth_l1(coords, y_coords)
 
-        return bce_loss.mean()
+        seg_loss = self.bce(seg, y_seg.float())
+
+        probs = torch.sigmoid(seg)
+        pt = y_seg * probs + (1 - y_seg) * (1 - probs)
+        alphat = y_seg * self.alpha + (1 - y_seg) * (1 - self.alpha)
+        seg_loss *= alphat * (1 - pt) ** self.gamma
+        seg_loss = seg_loss.mean()
+
+        loss = coords_loss + seg_loss
+        log_dict = {
+            'loss/': loss,
+            'loss/coords': coords_loss,
+            'loss/seg': seg_loss,
+        }
+
+        return loss, log_dict

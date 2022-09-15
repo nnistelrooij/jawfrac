@@ -35,18 +35,17 @@ class MandiblePatchSegDataModule(MandibleSegDataModule):
 
             rng = np.random.default_rng(self.seed)
             val_transforms = T.Compose(
+                T.RelativePatchCoordinates(),
                 T.IntensityAsFeatures(),
                 T.PositiveNegativePatches(
-                    max_patches=self.max_patches_per_scan,
-                    rng=rng,
+                    max_patches=self.max_patches_per_scan, rng=rng,
                 ),
                 T.ToTensor(),
             )
             train_transforms = T.Compose(
                 T.RandomXAxisFlip(rng=rng),
                 T.RandomPatchTranslate(
-                    max_voxels=self.dataset_cfg['patch_size'] // 4,
-                    rng=rng,
+                    max_voxels=self.dataset_cfg['patch_size'] // 4, rng=rng,
                 ),
                 val_transforms,
             )
@@ -91,14 +90,18 @@ class MandiblePatchSegDataModule(MandibleSegDataModule):
         batch: List[Dict[str, TensorType[..., Any]]],
     ) -> Tuple[
         TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
-        TensorType['P', 'size', 'size', 'size', torch.int64],
+        Tuple[
+            TensorType['P', 3, torch.float32],
+            TensorType['P', 'size', 'size', 'size', torch.int64],
+        ],
     ]:
         batch_dict = {key: [d[key] for d in batch] for key in batch[0]}
 
         features = torch.cat(batch_dict['features'])
+        coords = torch.cat(batch_dict['coords'])
         labels = torch.cat(batch_dict['labels'])
 
-        return features, labels
+        return features, (coords, labels)
 
     def test_collate_fn(
         self,
@@ -106,13 +109,15 @@ class MandiblePatchSegDataModule(MandibleSegDataModule):
     ) -> Tuple[
         TensorType['C', 'D', 'H', 'W', torch.float32],
         TensorType['P', 3, 2, torch.int64],
+        TensorType['P', 3, torch.float32],
         TensorType['D', 'H', 'W', torch.int64],
     ]:
         features = batch[0]['features']
         patch_idxs = batch[0]['patch_idxs']
+        patch_coords = batch[0]['patch_coords']
         labels = batch[0]['labels']
         
-        return features, patch_idxs, labels
+        return features, patch_idxs, patch_coords, labels
 
     def predict_collate_fn(
         self,

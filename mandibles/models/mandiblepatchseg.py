@@ -2,19 +2,182 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pytorch_lightning as pl
-from scipy import ndimage
+from scipy import interpolate, ndimage
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
-from torchmetrics import ConfusionMatrix, F1Score
+from torchmetrics import F1Score
 from torchtyping import TensorType
 from torch_scatter import scatter_mean
 
 import mandibles.nn as nn
-from miccai import PointTensor
 from miccai.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearWarmupLR,
 )
+
+
+def patches_subgrid(
+    patch_idxs: TensorType['P', 3, 2, torch.int64],
+) -> Tuple[
+    TensorType['P', 3, torch.int64],
+    List[TensorType['D', torch.float32]],
+    Tuple[int, int, int],
+]:
+    # determine subgrid covered by patches
+    subgrid_idxs, subgrid_points = [], []
+    for dim_patch_idxs in patch_idxs.permute(1, 0, 2):
+        unique, inverse = torch.unique(
+            input=dim_patch_idxs, return_inverse=True, dim=0,
+        )
+        subgrid_idxs.append(inverse)
+
+        centers = unique.float().mean(dim=1)
+        subgrid_points.append(centers)
+
+    subgrid_idxs = torch.column_stack(subgrid_idxs)
+    subgrid_shape = tuple(p.shape[0] for p in subgrid_points)
+
+    return subgrid_idxs, subgrid_points, subgrid_shape
+
+
+def project_patches(
+    model: nn.MandibleNet,
+    features: TensorType['C', 'D', 'H', 'W', torch.float32],
+    patch_idxs: TensorType['P', 3, 2, torch.int64],
+    subgrid_idxs: TensorType['P', 3, torch.int64],
+    subgrid_shape: Tuple[int, int, int],
+    batch_size: int=24,
+) -> Tuple[
+    TensorType['d', 'h', 'w', 3, torch.float32],
+    TensorType['D', 'H', 'W', torch.float32],
+]:
+    # initial prediction of coordinates
+    out_coords = torch.zeros(subgrid_shape + (3,)).to(features)
+
+    # initial prediction of segmentation
+    out_seg = torch.full_like(features[0], -float('inf'))
+
+    # convert patch indices to patch slices
+    patch_slices = []
+    for patch_idxs in patch_idxs:
+        slices = tuple(slice(start, stop) for start, stop in patch_idxs)
+        patch_slices.append(slices)
+
+    # process in batches to speed up inference
+    for i in range(0, len(patch_slices), batch_size):
+        # extract batch of patches from features volume
+        x = []
+        for slices in patch_slices[i:i + batch_size]:
+            slices = (slice(None),) + slices
+            patch = features[slices]
+            x.append(patch)
+
+        # predict relative position and segmentation of patches
+        x = torch.stack(x)
+        coords, seg = model(x)
+
+        # put position prediction in subgrid
+        index_arrays = tuple(subgrid_idxs[i:i + batch_size].T)
+        out_coords[index_arrays] = coords
+
+        # compute maximum of overlapping predictions
+        for slices, seg in zip(patch_slices[i:i + batch_size], seg):
+            out_seg[slices] = torch.maximum(out_seg[slices], seg)
+
+    return out_coords, out_seg
+
+
+def interpolate_positions(
+    coords: TensorType['d', 'h', 'w', 3, torch.float32],
+    subgrid_points: List[TensorType['D', 3, torch.float32]],
+    out_shape: Tuple[int, int, int],
+) -> TensorType['D', 'H', 'W', 3, torch.float32]:
+    # compute coordinates of output voxels
+    out_points = [np.arange(dim_size) + 0.5 for dim_size in out_shape]
+    out_points = np.meshgrid(*out_points, indexing='ij')
+    out_points = np.stack(out_points, axis=3)
+
+    # interpolate subgrid values to output voxels
+    out_coords = interpolate.interpn(
+        points=[p.cpu() for p in subgrid_points],
+        values=coords.cpu(),
+        xi=out_points,
+        bounds_error=False,
+        fill_value=None,
+    )
+
+    return torch.from_numpy(out_coords).to(coords)
+
+
+def filter_connected_components(
+    coords: TensorType['D', 'H', 'W', 3, torch.float32],
+    seg: TensorType['D', 'H', 'W', torch.float32],
+) -> TensorType['D', 'H', 'W', torch.bool]:
+    # determine connected components in volume
+    probs = torch.sigmoid(seg)
+    labels = (probs >= 0.6).long()
+    component_idxs, _ = ndimage.label(
+        input=seg.cpu(),
+        structure=ndimage.generate_binary_structure(3, 1),
+    )
+    component_idxs = torch.from_numpy(component_idxs).to(labels)
+
+    # determine components comprising at least 20k voxels
+    _, component_idxs, component_counts = torch.unique(
+        component_idxs, return_inverse=True, return_counts=True,
+    )
+    count_mask = component_counts >= 20_000
+
+    # determine components with mean confidence at least 0.70
+    component_probs = scatter_mean(
+        src=probs.flatten(),
+        index=component_idxs.flatten(),
+    )
+    prob_mask = component_probs >= 0.6
+
+    # determine components within two variance of centroid
+    coords[..., 0] -= 1  # left-right symmetry
+    component_coords = scatter_mean(
+        src=coords.reshape(-1, 3),
+        index=component_idxs.flatten(),
+        dim=0,
+    )
+    component_dists = torch.sum(component_coords ** 2, dim=1)
+    dist_mask = component_dists < 2
+
+    # project masks back to volume
+    component_mask = count_mask & prob_mask & dist_mask
+    volume_mask = component_mask[component_idxs]
+
+    return volume_mask
+
+
+def fill_source_volume(
+    volume_mask: TensorType['D', 'H', 'W', torch.bool],
+    affine: TensorType[4, 4, torch.float32],
+    shape: TensorType[3, torch.int64],
+) -> TensorType['D', 'H', 'W', torch.bool]:
+    # compute voxel indices into source volume
+    voxels = volume_mask.nonzero().float()
+    hom_voxels = torch.column_stack((voxels, torch.ones_like(voxels[:, 0])))
+
+    orig_voxels = torch.einsum(
+        'ij,kj->ki', torch.linalg.inv(affine), hom_voxels,
+    )
+    orig_voxels = orig_voxels[:, :3].round().long()
+
+    # initialize empty volume and fill with binary segmentation
+    out = torch.zeros(shape.tolist(), dtype=torch.bool)
+    out[tuple(orig_voxels.T)] = True
+
+    # dilate volume to fill empty space between foreground voxels
+    out = ndimage.binary_dilation(
+        input=out,
+        structure=ndimage.generate_binary_structure(3, 2),
+        iterations=3,
+    )
+
+    return torch.from_numpy(out).to(volume_mask)
 
 
 class MandiblePatchSegModule(pl.LightningModule):
@@ -30,7 +193,7 @@ class MandiblePatchSegModule(pl.LightningModule):
         super().__init__()
 
         self.model = nn.MandibleNet(**model_cfg)
-        self.criterion = nn.FocalLoss(alpha=0.25, gamma=2.0)
+        self.criterion = nn.MandibleLoss(alpha=0.25, gamma=2.0)
         self.f1 = F1Score(num_classes=2, average='macro')
 
         self.lr = lr
@@ -41,26 +204,35 @@ class MandiblePatchSegModule(pl.LightningModule):
     def forward(
         self,
         x: TensorType['P', 'C', 'size', 'size', 'size', torch.float32],       
-    ) -> TensorType['P', 'size', 'size', 'size', torch.float32]:
-        x = self.model(x)
+    ) -> Tuple[
+        TensorType['P', 3, torch.float32],
+        TensorType['P', 'size', 'size', 'size', torch.float32],
+    ]:
+        coords, seg = self.model(x)
 
-        return x
+        return coords, seg
 
     def training_step(
         self,
         batch: Tuple[
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
-            TensorType['P', 'size', 'size', 'size', torch.int64],
+            Tuple[
+                TensorType['P', 3, torch.float32],
+                TensorType['P', 'size', 'size', 'size', torch.int64],
+            ],
         ],
         batch_idx: int,
     ) -> TensorType[torch.float32]:
         x, y = batch
 
-        x = self(x)
+        coords, seg = self(x)
 
-        loss = self.criterion(x, y)
+        loss, log_dict = self.criterion(coords, seg, y)
 
-        self.log('loss/train', loss)
+        self.log_dict({
+            k.replace('/', '/train_' if k[-1] != '/' else '/train'): v
+            for k, v in log_dict.items()
+        })
 
         return loss
 
@@ -68,131 +240,71 @@ class MandiblePatchSegModule(pl.LightningModule):
         self,
         batch: Tuple[
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
-            TensorType['P', 'size', 'size', 'size', torch.int64],
+            Tuple[
+                TensorType['P', 3, torch.float32],
+                TensorType['P', 'size', 'size', 'size', torch.int64],
+            ],
         ],
         batch_idx: int,
     ) -> None:
         x, y = batch
 
-        x = self(x)
+        coords, seg = self(x)
 
-        loss = self.criterion(x, y)
-        self.f1((x >= 0).long().flatten(), y.flatten())
+        _, log_dict = self.criterion(coords, seg, y)
+        self.f1((seg >= 0).long().flatten(), y[1].flatten())
 
-        self.log('loss/val', loss)
-        self.log('f1/val', self.f1)
+        self.log_dict({
+            **{
+                k.replace('/', '/val_' if k[-1] != '/' else '/val'): v
+                for k, v in log_dict.items()
+            },
+            'f1/val': self.f1,
+        })    
 
-    def predict_volume(
+    def predict_volumes(
         self,
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
         patch_idxs: TensorType['P', 3, 2, torch.int64],
-        batch_size: int=24,
-    ) -> TensorType['D', 'H', 'W', torch.float32]:
-        # out = torch.zeros_like(features[0])
-        out = torch.full_like(features[0], -float('inf'))
+    ) -> Tuple[
+        TensorType['D', 'H', 'W', 3, torch.float32],
+        TensorType['D', 'H', 'W', torch.float32],
+    ]:
+        # determine subgrid covered by patches
+        subgrid = patches_subgrid(patch_idxs)
+        idxs, points, shape = subgrid
 
-        patch_slices = []
-        for patch_idxs in patch_idxs:
-            slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-            patch_slices.append(slices)
+        # combine overlapping voxel predictions
+        coords, seg = project_patches(
+            self.model, features, patch_idxs, idxs, shape,
+        )
 
-        for i in range(0, len(patch_slices), batch_size):
-            # extract batch of patches from features volume
-            x = []
-            for slices in patch_slices[i:i + batch_size]:
-                slices = (slice(None),) + slices
-                x.append(features[slices])
+        # interpolate relative position predictions
+        coords = interpolate_positions(coords, points, seg.shape)
 
-            # predict segmentation of patches
-            x = torch.stack(x)
-            x = self(x)
-
-            # compute maximum of overlapping predictions
-            for slices, x in zip(patch_slices[i:i + batch_size], x):
-                # out[crop[1:]] += x
-                out[slices] = torch.maximum(out[slices], x)
-
-        return torch.sigmoid(out)
+        return coords, seg
 
     def test_step(
         self,
         batch: Tuple[
             TensorType['C', 'D', 'H', 'W', torch.float32],
             TensorType['P', 3, 2, torch.int64],
+            TensorType['P', 3, torch.float32],
             TensorType['D', 'H', 'W', torch.int64],
         ],
         batch_idx: int,
     ) -> None:
-        features, patch_idxs, target = batch
+        features, patch_idxs, patch_coords, labels = batch
 
         # predict binary segmentation
-        x = self.predict_volume(features, patch_idxs)
-        mask = x > 0.5
+        coodrs, seg = self.predict_volumes(features, patch_idxs)
+        mask = torch.sigmoid(seg) > 0.5
 
         # compute metrics
-        self.f1(mask.long().flatten(), target.flatten())
+        self.f1(mask.long().flatten(), labels.flatten())
         
         # log metrics
         self.log('f1/test', self.f1)
-
-    def filter_connected_components(
-        self,
-        probs: TensorType['D', 'H', 'W', torch.float32],
-    ) -> TensorType['D', 'H', 'W', torch.bool]:
-        # determine connected components in volume
-        fg_mask = probs > 0.75
-        labels, _ = ndimage.label(
-            input=fg_mask.cpu().numpy(),
-            structure=ndimage.generate_binary_structure(3, 1),
-        )
-        labels = torch.tensor(labels, dtype=torch.int64, device=probs.device)
-
-        # determine components comprising at least 1200 voxels
-        _, inverse, counts = torch.unique(
-            labels, return_inverse=True, return_counts=True,
-        )
-        count_mask = counts >= 32_000
-
-        # determine components with mean confidence at least 0.75
-        component_probs = scatter_mean(
-            src=probs.flatten(),
-            index=labels.flatten(),
-        )
-        prob_mask = component_probs >= 0.8
-
-        # project masks back to volume
-        component_mask = count_mask & prob_mask
-        volume_mask = component_mask[inverse]
-
-        print(component_mask.sum())
-
-        return volume_mask
-
-    def fill_volume(
-        self,
-        mask: TensorType['D', 'H', 'W', torch.bool],
-        affine: TensorType[4, 4, torch.float32],
-        shape: TensorType[3, torch.int64],
-    ) -> TensorType['D', 'H', 'W', torch.bool]:
-        # compute voxel indices into source volume
-        voxels = mask.nonzero().float()
-        hom_voxels = torch.column_stack((voxels, torch.ones_like(voxels[:, 0])))
-
-        orig_voxels = torch.einsum('ij,kj->ki', torch.linalg.inv(affine), hom_voxels)
-        orig_voxels = orig_voxels[:, :3].round().long()
-
-        # initialize empty volume and fill with binary segmentation
-        out = torch.zeros(shape.tolist(), dtype=torch.int64)
-        out[tuple(orig_voxels.T)] = 1
-
-        # dilate volume to fill empty space between foreground voxels
-        out = ndimage.binary_dilation(
-            input=out,
-            structure=ndimage.generate_binary_structure(3, 2),
-            iterations=3,
-        )
-
-        return torch.tensor(out)
 
     def predict_step(
         self,
@@ -204,18 +316,16 @@ class MandiblePatchSegModule(pl.LightningModule):
         ],
         batch_idx: int,
     ) -> TensorType['D', 'H', 'W', torch.bool]:
-        if batch_idx == 3:
-            k = 3
         features, patch_idxs, affine, shape = batch
 
         # predict binary segmentation
-        probs = self.predict_volume(features, patch_idxs)
+        coords, seg = self.predict_volumes(features, patch_idxs)
 
         # remove small or low-confidence connected components
-        fg_mask = self.filter_connected_components(probs)
+        volume_mask = filter_connected_components(coords, seg)
 
         # fill volume with original shape given foreground mask
-        out = self.fill_volume(fg_mask, affine, shape)
+        out = fill_source_volume(volume_mask, affine, shape)
 
         return out
 
