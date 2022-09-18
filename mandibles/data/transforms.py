@@ -48,7 +48,6 @@ class RegularSpacing:
 
     def __call__(
         self,
-        intensities: NDArray[Any],
         spacing: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -56,11 +55,13 @@ class RegularSpacing:
         zoom = spacing / self.spacing
 
         # interpolate the inputs to have regular voxel spacing
-        data_dict['intensities'] = ndimage.zoom(intensities, zoom)
-        if 'labels' in data_dict:
-            max_label = data_dict['labels'].max()
-            data_dict['labels'] = ndimage.zoom(data_dict['labels'], zoom)
-            data_dict['labels'] = np.clip(data_dict['labels'], 0, max_label)
+        for key in ['intensities', 'mandible', 'labels']:
+            if key not in data_dict:
+                continue
+            
+            min_value, max_value = data_dict[key].min(), data_dict[key].max()
+            data_dict[key] = ndimage.zoom(input=data_dict[key], zoom=zoom)
+            data_dict[key] = np.clip(data_dict[key], min_value, max_value)
 
         # update voxel spacing accordingly
         data_dict['spacing'] = self.spacing
@@ -88,7 +89,7 @@ class NaturalHeadPositionOrient:
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         # reorient volumes to standard basis
-        for key in ['intensities', 'labels']:
+        for key in ['intensities', 'mandible', 'labels']:
             if key not in data_dict:
                 continue
 
@@ -378,7 +379,6 @@ class PositiveNegativePatches:
         features: NDArray[np.float64],
         labels: NDArray[Any],
         patch_idxs: NDArray[Any],
-        patch_coords: NDArray[Any],
         pos_idxs: NDArray[np.int64],
         neg_idxs: NDArray[np.int64],
         **data_dict: Dict[str, Any],
@@ -410,7 +410,8 @@ class PositiveNegativePatches:
         data_dict['features'] = np.stack(feature_patches)
         data_dict['labels'] = np.stack(label_patches)
         data_dict['patch_idxs'] = patch_idxs
-        data_dict['coords'] = patch_coords[pos_neg_idxs]
+        if 'patch_coords' in data_dict:
+            data_dict['coords'] = data_dict['patch_coords'][pos_neg_idxs]
 
         return data_dict
 

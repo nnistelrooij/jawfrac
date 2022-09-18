@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import nibabel
 import numpy as np
@@ -19,27 +19,18 @@ class JawFracDataset(MeshDataset):
         regular_spacing: float,
         patch_size: int,
         stride: int,
-        bone_hu_threshold: int,
-        bone_volume_threshold: float,
         **kwargs: Dict[str, Any],
     ) -> None:
         pre_transform = T.Compose(
-            # T.MandibleCrop(padding=mandible_crop_padding),
+            T.MandibleCrop(padding=mandible_crop_padding),
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
             T.PatchIndices(patch_size=patch_size, stride=stride),
-            T.BonePatchIndices(
-                intensity_thresh=bone_hu_threshold,
-                volume_thresh=bone_volume_threshold,
-            ),
+            T.BonePatchIndices(),
             *((
-                T.ForegroundPatchIndices(patch_size=patch_size * 3 // 2),
-                T.NegativePatchIndices(),
-                T.ExpandLabel(
-                    fg_iters=1,
-                    all_iters=1,
-                    fg_intensity_thresh=bone_hu_threshold,
-                ),
+                T.PositivePatchIndices(patch_size=patch_size),
+                T.NegativeIndices(),
+                T.ExpandLabel(bone_iters=1, all_iters=1),
             ) if stage == 'fit' else ()),
         )
 
@@ -47,7 +38,7 @@ class JawFracDataset(MeshDataset):
 
     def load_scan(
         self,
-        files: Path,
+        files: List[Path],
     ) -> Dict[str, NDArray[Any]]:
         scan_file, mandible_file = files
 
@@ -56,6 +47,8 @@ class JawFracDataset(MeshDataset):
 
         seg = nibabel.load(self.root / mandible_file)
         mask = np.asarray(seg.dataobj) == 1
+
+        print(scan_file.parent.stem)
 
         return {
             'intensities': intensities,

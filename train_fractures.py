@@ -33,7 +33,6 @@ def train():
     logger.log_hyperparams(config)
 
 
-
     epoch_checkpoint_callback = ModelCheckpoint(
         save_top_k=10,
         monitor='epoch',
@@ -53,7 +52,7 @@ def train():
         max_epochs=config['model']['epochs'],
         logger=logger,
         # accumulate_grad_batches=4,
-        gradient_clip_val=1,
+        gradient_clip_val=35,
         callbacks=[
             epoch_checkpoint_callback,
             loss_checkpoint_callback,

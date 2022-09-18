@@ -2,7 +2,6 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 import yaml
-from tqdm import tqdm
 
 from mandibles.datamodules import MandiblePatchSegDataModule
 from mandibles.models import MandiblePatchSegModule
@@ -30,10 +29,10 @@ def train():
         default_hp_metric=False,
     )
 
-    dm.setup('fit')
-    config['datamodule']['pre_transform'] = repr(dm.train_dataset.pre_transform)
-    config['datamodule']['train_transform'] = repr(dm.train_dataset.transform)
-    config['datamodule']['val_transform'] = repr(dm.val_dataset.transform)
+    # dm.setup('fit')
+    # config['datamodule']['pre_transform'] = repr(dm.train_dataset.pre_transform)
+    # config['datamodule']['train_transform'] = repr(dm.train_dataset.transform)
+    # config['datamodule']['val_transform'] = repr(dm.val_dataset.transform)
     logger.log_hyperparams(config)
 
 

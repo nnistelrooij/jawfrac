@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Tuple
 
+import nibabel
 import numpy as np
 import pytorch_lightning as pl
 from scipy import interpolate, ndimage
@@ -40,30 +41,13 @@ def patches_subgrid(
     return subgrid_idxs, subgrid_points, subgrid_shape
 
 
-def project_patches(
-    model: nn.MandibleNet,
+def batch_forward(
+    model: torch.nn.Module,
     features: TensorType['C', 'D', 'H', 'W', torch.float32],
-    patch_idxs: TensorType['P', 3, 2, torch.int64],
-    subgrid_idxs: TensorType['P', 3, torch.int64],
-    subgrid_shape: Tuple[int, int, int],
+    patch_slices: List[Tuple[slice, slice, slice]],
     batch_size: int=24,
-) -> Tuple[
-    TensorType['d', 'h', 'w', 3, torch.float32],
-    TensorType['D', 'H', 'W', torch.float32],
-]:
-    # initial prediction of coordinates
-    out_coords = torch.zeros(subgrid_shape + (3,)).to(features)
-
-    # initial prediction of segmentation
-    out_seg = torch.full_like(features[0], -float('inf'))
-
-    # convert patch indices to patch slices
-    patch_slices = []
-    for patch_idxs in patch_idxs:
-        slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-        patch_slices.append(slices)
-
-    # process in batches to speed up inference
+):
+    out = []
     for i in range(0, len(patch_slices), batch_size):
         # extract batch of patches from features volume
         x = []
@@ -74,15 +58,41 @@ def project_patches(
 
         # predict relative position and segmentation of patches
         x = torch.stack(x)
-        coords, seg = model(x)
+        pred = model(x)
+        out.append(pred)
 
-        # put position prediction in subgrid
-        index_arrays = tuple(subgrid_idxs[i:i + batch_size].T)
-        out_coords[index_arrays] = coords
+    return out
 
-        # compute maximum of overlapping predictions
-        for slices, seg in zip(patch_slices[i:i + batch_size], seg):
-            out_seg[slices] = torch.maximum(out_seg[slices], seg)
+
+def project_patches(
+    model: torch.nn.Module,
+    features: TensorType['C', 'D', 'H', 'W', torch.float32],
+    patch_idxs: TensorType['P', 3, 2, torch.int64],
+    subgrid_idxs: TensorType['P', 3, torch.int64],
+    subgrid_shape: Tuple[int, int, int],
+) -> Tuple[
+    TensorType['d', 'h', 'w', 3, torch.float32],
+    TensorType['D', 'H', 'W', torch.float32],
+]:
+    # convert patch indices to patch slices
+    patch_slices = []
+    for patch_idxs in patch_idxs:
+        slices = tuple(slice(start, stop) for start, stop in patch_idxs)
+        patch_slices.append(slices)
+
+    # do model processing in batches
+    out = batch_forward(model, features, patch_slices)
+    coords, seg = map(lambda t: torch.cat(t), zip(*out))
+
+    # put position prediction in subgrid
+    out_coords = torch.zeros(subgrid_shape + (3,)).to(features)
+    index_arrays = tuple(subgrid_idxs.T)
+    out_coords[index_arrays] = coords
+
+    # compute maximum of overlapping predictions
+    out_seg = torch.full_like(features[0], -float('inf'))
+    for slices, seg in zip(patch_slices, seg):
+        out_seg[slices] = torch.maximum(out_seg[slices], seg)
 
     return out_coords, out_seg
 
@@ -112,12 +122,13 @@ def interpolate_positions(
 def filter_connected_components(
     coords: TensorType['D', 'H', 'W', 3, torch.float32],
     seg: TensorType['D', 'H', 'W', torch.float32],
+    conf_thresh: float=0.6,
 ) -> TensorType['D', 'H', 'W', torch.bool]:
     # determine connected components in volume
     probs = torch.sigmoid(seg)
-    labels = (probs >= 0.6).long()
+    labels = (probs >= conf_thresh).long()
     component_idxs, _ = ndimage.label(
-        input=seg.cpu(),
+        input=labels.cpu(),
         structure=ndimage.generate_binary_structure(3, 1),
     )
     component_idxs = torch.from_numpy(component_idxs).to(labels)

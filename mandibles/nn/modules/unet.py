@@ -12,7 +12,7 @@ from mandibles.nn.modules.convnet import (
 from mandibles.nn.modules.gapm import GrayscaleAdaptivePerceptionModule
 
 
-class FracNet(nn.Module):
+class UNet(nn.Module):
 
     def __init__(
         self,
@@ -24,12 +24,12 @@ class FracNet(nn.Module):
 
         self.encoder = Encoder(
             in_channels,
-            [16, 32, 64],
+            [16, 32, 64, 128],
         )
 
         self.decoder = Decoder(
             num_classes,
-            [64, 128, 64, 32, 16],
+            [128, 64, 32, 16],
         )
 
     def forward(
@@ -58,13 +58,20 @@ class MandibleNet(nn.Module):
         self.gapm = GrayscaleAdaptivePerceptionModule(
             num_awms=num_awms,
         )
-        self.unet = FracNet(
+        self.unet = UNet(
             in_channels=num_awms,
             num_classes=num_classes,
             channels_list=channels_list,
         )
 
-        self.loc_head = nn.Linear(64, 3)
+        self.loc_head = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64, momentum=0.1), 
+            nn.ReLU(), 
+            nn.Linear(64, 3)
+        )
+        
+        # self.loc_head = nn.Linear(64, 3)
         self.seg_head = nn.Conv3d(32, num_classes, 3, padding=1)
 
     def forward(
@@ -105,12 +112,15 @@ class Encoder(nn.Module):
         x: TensorType['B', 'C', 'H', 'W', 'D', torch.float32],
     ) -> List[TensorType['B', 'C', 'H', 'W', 'D', torch.float32]]:
         xs = []
-        for layer in self.layers:
+        for layer in self.layers[:-1]:
             x = layer(x)
             xs = [x] + xs
             x = F.max_pool3d(x, kernel_size=2)
 
-        return [x] + xs
+        x = self.layers[-1](x)
+        xs = [x] + xs
+
+        return xs
 
 
 class Decoder(nn.Module):
@@ -123,9 +133,9 @@ class Decoder(nn.Module):
         super().__init__()
 
         self.layers = nn.ModuleList()
-        for i in range(len(channels_list) - 2):
+        for i in range(-1, len(channels_list) - 2):
             self.layers.append(nn.Sequential(
-                ConvBlock(channels_list[i], channels_list[i + 1]),
+                ConvBlock(channels_list[i], channels_list[i + 1]) if i >= 0 else nn.Identity(),
                 ConvTransposeBlock(channels_list[i + 1], channels_list[i + 2], 3),
             ))
 

@@ -1,18 +1,59 @@
 from typing import Any, Dict, List, Tuple
 
 import pytorch_lightning as pl
+from scipy import ndimage
+from sklearn.cluster import DBSCAN
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 from torchmetrics import ConfusionMatrix, F1Score
 from torchtyping import TensorType
+from torch_scatter import scatter_mean
 
-from fractures.metrics import FracRecall
+from fractures.metrics import FracPrecision, FracRecall
 import fractures.nn as nn
+from mandibles.models.mandiblepatchseg import (
+    batch_forward,
+    fill_source_volume,
+)
 from miccai import PointTensor
 from miccai.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearWarmupLR,
 )
+
+
+def filter_connected_components(
+    seg: TensorType['D', 'H', 'W', torch.float32],
+    conf_thresh: float,
+    min_component_size: int,
+) -> TensorType['D', 'H', 'W', torch.bool]:
+    # determine connected components in volume
+    probs = torch.sigmoid(seg)
+    labels = (probs >= conf_thresh).long()
+    component_idxs, _ = ndimage.label(
+        input=labels.cpu(),
+        structure=ndimage.generate_binary_structure(3, 1),
+    )
+    component_idxs = torch.from_numpy(component_idxs).to(labels)
+
+    # determine components comprising at least 20k voxels
+    _, component_idxs, component_counts = torch.unique(
+        component_idxs, return_inverse=True, return_counts=True,
+    )
+    count_mask = component_counts >= min_component_size
+
+    # determine components with mean confidence at least 0.70
+    component_probs = scatter_mean(
+        src=probs.flatten(),
+        index=component_idxs.flatten(),
+    )
+    prob_mask = component_probs >= conf_thresh
+
+    # project masks back to volume
+    component_mask = count_mask & prob_mask
+    volume_mask = component_mask[component_idxs]
+
+    return volume_mask
 
 
 class SemSegModule(pl.LightningModule):
@@ -23,6 +64,8 @@ class SemSegModule(pl.LightningModule):
         epochs: int,
         warmup_epochs: int,
         weight_decay: float,
+        conf_threshold: float,
+        min_component_size: int,
         **model_cfg: Dict[str, Any],
     ) -> None:
         super().__init__()
@@ -30,12 +73,15 @@ class SemSegModule(pl.LightningModule):
         self.model = nn.FracNet(**model_cfg)
         self.criterion = nn.FocalLoss(alpha=0.25, gamma=2.0)
         self.f1 = F1Score(num_classes=2, average='macro')
+        self.precision_metric = FracPrecision()
         self.recall = FracRecall()
 
         self.lr = lr
         self.epochs = epochs
         self.warmup_epochs = warmup_epochs
         self.weight_decay = weight_decay
+        self.conf_thresh = conf_threshold
+        self.min_component_size = min_component_size
 
     def forward(
         self,
@@ -76,7 +122,7 @@ class SemSegModule(pl.LightningModule):
         x = self(x)
 
         loss = self.criterion(x, y)
-        self.f1((x >= 0).long().flatten(), y.flatten())
+        self.f1((x >= 0).long().flatten(), (y > 0).long().flatten())
 
         self.log('loss/val', loss)
         self.log('f1/val', self.f1)
@@ -85,33 +131,24 @@ class SemSegModule(pl.LightningModule):
         self,
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
         patch_idxs: TensorType['P', 3, 2, torch.int64],
-        batch_size: int=24,
+        batch_size: int=12,
     ) -> TensorType['D', 'H', 'W', torch.float32]:
-        # out = torch.zeros_like(features[0])
-        out = torch.full_like(features[0], float('inf'))
-
+        # convert patch indices to patch slices
         patch_slices = []
         for patch_idxs in patch_idxs:
             slices = tuple(slice(start, stop) for start, stop in patch_idxs)
             patch_slices.append(slices)
 
-        for i in range(0, patch_idxs.shape[0], batch_size):
-            # extract batch of patches from features volume
-            x = []
-            for slices in patch_slices[i:i + batch_size]:
-                slices = (slice(None),) + slices
-                x.append(features[slices])
+        # do model processing in batches
+        out = batch_forward(self.model, features, patch_slices)
+        seg = torch.cat(out)
 
-            # predict segmentation of patches
-            x = torch.stack(x)
-            x = self(x)
+        # compute maximum of overlapping predictions
+        out = torch.full_like(features[0], -float('inf'))
+        for slices, seg in zip(patch_slices, seg):
+            out[slices] = torch.maximum(out[slices], seg)
 
-            # compute maximum of overlapping predictions
-            for slices, x in zip(patch_slices[i:i + batch_size], x):
-                # out[crop[1:]] += x
-                out[slices] = torch.maximum(out[slices], x)
-
-        return torch.sigmoid(out)
+        return out
 
     def test_step(
         self,
@@ -126,14 +163,18 @@ class SemSegModule(pl.LightningModule):
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)
-        mask = x < 0.4
+        mask = filter_connected_components(
+            x, self.conf_thresh, self.min_component_size,
+        )
 
         # compute metrics
         self.f1(mask.long().flatten(), (target > 0).long().flatten())
+        self.precision_metric(mask, target)
         self.recall(mask, target)
         
         # log metrics
         self.log('f1/test', self.f1)
+        self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall)
 
     def predict_step(
@@ -150,36 +191,13 @@ class SemSegModule(pl.LightningModule):
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)
-        y = x < 0.9
 
-        # compute voxel indices into source volume
-        voxels = y.nonzero().float()
-        hom_voxels = torch.column_stack((voxels, torch.ones_like(voxels[:, 0])))
-
-        orig_voxels = torch.einsum('ij,kj->ki', torch.linalg.inv(affine), hom_voxels)
-        orig_voxels = orig_voxels[:, :3].round().long()
-
-        # initialize empty volume and fill with binary segmentation
-        out = torch.zeros(shape.tolist(), dtype=int)
-        out[tuple(orig_voxels.T)] = 1
-
-        # cluster foreground voxels with DBSCAN
-        pt = PointTensor(coordinates=voxels)
-        cluster_idxs = pt.cluster(
-            max_neighbor_dist=10.0,
-            min_points=100,
-            return_index=True,
+        mask = filter_connected_components(
+            x ,self.conf_thresh, self.min_component_size,
         )
 
-        # determine clusters with at least 1200 voxels
-        _, inverse, counts = torch.unique(
-            cluster_idxs, return_inverse=True, return_counts=True,
-        )        
-        frac_mask = (cluster_idxs != -1) & (counts >= 1200)[inverse]
-
-        # fill volume with large clusters
-        out[tuple(orig_voxels[frac_mask].T)] = 2
-
+        out = fill_source_volume(mask, affine, shape)
+        
         return out
 
     def configure_optimizers(self) -> Tuple[

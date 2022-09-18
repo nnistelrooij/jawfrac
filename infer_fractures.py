@@ -17,7 +17,7 @@ def infer():
     )
 
     model = SemSegModule.load_from_checkpoint(
-        'checkpoints/fracture8.ckpt',
+        'checkpoints/fractures.ckpt',
         in_channels=dm.num_channels,
         num_classes=dm.num_classes,
         **config['model'],
@@ -28,8 +28,8 @@ def infer():
         devices=1,
         max_epochs=config['model']['epochs'],
     )
-    dm.setup(stage='fit')
-    preds = trainer.validate(model, datamodule=dm)
+    # dm.setup(stage='fit')
+    preds = trainer.test(model, datamodule=dm)
 
     for (file, _), pred in zip(dm.predict_dataset.files, preds):
         pred = pred.cpu().numpy().astype(np.uint16)

@@ -45,14 +45,21 @@ class MandibleSegDataModule(pl.LightningDataModule):
         files = [f for f in files if f.parent.name not in exclude]
         files = [f.relative_to(self.root) for f in files]
 
-        if not (self.root / 'Fabian overview.csv').exists():
-            return files
+        if (self.root / 'Fabian overview.csv').exists():
+            df = pd.read_csv(self.root / 'Fabian overview.csv')
+            df = df[pd.isna(df['Note']) & ~pd.isna(df['Complete'])]
+            df = df[~df['Complete'].str.match(r'.*[,+]')]
+            pseudonyms = df['Pseudonym'].tolist()
 
-        df = pd.read_csv(self.root / 'Fabian overview.csv')
-        df = df.sort_values(by='Pseudonym')
-        df = df[pd.isna(df['Note']) & ~pd.isna(df['Complete'])]
-        df = df[~df['Complete'].str.match(r'.*[,+]')]
-        files = [files[i] for i in df.index]
+            dirs = list(map(lambda p: p.parent.stem, files))
+            files = [f for f, d in zip(files, dirs) if d in pseudonyms]
+        elif (self.root / 'Sophie overview.csv').exists():
+            df = pd.read_csv(self.root / 'Sophie overview.csv')
+            mask = pd.isna(df['HU']) & pd.isna(df['Dislocated'])
+            idxs = mask.index[mask]
+
+            patients = list(map(lambda p: int(p.parent.stem), files))
+            files = [f for f, p in zip(files, patients) if p - 1 in idxs]
 
         return files
 
@@ -62,11 +69,11 @@ class MandibleSegDataModule(pl.LightningDataModule):
         exclude: List[str]=[
         ],
     ) -> Union[List[Path], List[Tuple[Path, Path]]]:
-        # scan_files = self._filter_files('**/image.nii.gz')
-        scan_files = self._filter_files('**/*main*.nii.gz')
+        scan_files = self._filter_files('**/image.nii.gz')
+        # scan_files = self._filter_files('**/*main*.nii.gz')
 
         if stage == 'predict':
-            return scan_files[70:90]
+            return scan_files[110:130]
 
         ann_files = self._filter_files('**/seg.nii.gz')
         

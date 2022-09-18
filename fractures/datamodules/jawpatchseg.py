@@ -14,47 +14,52 @@ class JawFracPatchDataModule(JawFracDataModule):
 
     def __init__(
         self,
-        patch_size: int,
+        max_patches_per_scan: int,
         seed: int,
         **dm_cfg: Dict[str, Any],
     ) -> None:
-        super().__init__(seed=seed, patch_size=patch_size, **dm_cfg)
-
-        self.rng = np.random.default_rng(seed=seed)
+        super().__init__(seed=seed, **dm_cfg)
 
         self.default_transforms = T.Compose(
-            T.IntensityAsFeatures(
-                level=450.0, width=1100.0,
-                low=-1.0, high=1.0,
-            ),
-            # T.RelativeXYZAsFeatures(),
+            T.IntensityAsFeatures(),
             T.ToTensor(),
         )
 
-        self.patch_size = patch_size
+        self.max_patches_per_scan = max_patches_per_scan
 
     def setup(self, stage: Optional[str]=None) -> None:
         if stage is None or stage == 'fit':
             files = self._files('fit')
             train_files, val_files = self._split(files)
 
-            fit_transforms = T.Compose(
-                T.PositivePatchIndices(patch_size=self.patch_size, rng=self.rng),
-                self.default_transforms,
+            rng = np.random.default_rng(self.seed)
+            val_transforms = T.Compose(
+                T.IntensityAsFeatures(),
+                T.PositiveNegativePatches(
+                    max_patches=self.max_patches_per_scan, rng=rng,
+                ),
+                T.ToTensor(),
+            )
+            train_transforms = T.Compose(
+                T.RandomXAxisFlip(rng=rng),
+                T.RandomPatchTranslate(
+                    max_voxels=self.dataset_cfg['patch_size'] // 4, rng=rng,
+                ),
+                val_transforms,
             )
 
             self.train_dataset = JawFracDataset(
                 stage='fit',
                 root=self.root,
                 files=train_files,
-                transform=fit_transforms,
+                transform=train_transforms,
                 **self.dataset_cfg,
             )
             self.val_dataset = JawFracDataset(
                 stage='fit',
                 root=self.root,
                 files=val_files,
-                transform=fit_transforms,
+                transform=val_transforms,
                 **self.dataset_cfg,
             )
 
@@ -78,51 +83,19 @@ class JawFracPatchDataModule(JawFracDataModule):
     def num_classes(self) -> int:
         return 1
 
-    def crop_patches(
-        self,    
-        features: TensorType['C', 'D', 'H', 'W', torch.float32],
-        labels: TensorType['D', 'H', 'W', torch.float32],
-        pos_patch_idxs: TensorType['P', 3, 2, torch.int64],
-        neg_patch_idxs: TensorType['P', 3, 2, torch.int64],
-        **kwargs,
-    ) -> Tuple[
-        TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
-        TensorType['P', 'size', 'size', 'size', torch.int64],
-    ]:
-        # sample as many random negative patches as there are positive patches
-        neg_patch_idxs = neg_patch_idxs[torch.randperm(neg_patch_idxs.shape[0])]
-        neg_patch_idxs = neg_patch_idxs[:pos_patch_idxs.shape[0]]
-
-        patch_idxs = torch.cat((pos_patch_idxs, neg_patch_idxs))
-
-        # crop patches from volume and stack
-        feature_patches, label_patches = [], []
-        for patch_idxs in patch_idxs.numpy():
-            slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-            label_patch = labels[slices]
-            label_patch = (label_patch > 0).long()
-            label_patches.append(label_patch)
-
-            slices = (slice(None),) + slices
-            feature_patches.append(features[slices])
-        
-        return torch.stack(feature_patches), torch.stack(label_patches)
-
     def fit_collate_fn(
         self,
         batch: List[Dict[str, TensorType[..., Any]]],
     ) -> Tuple[
         TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
-        TensorType['P', 'size', 'size', 'size', torch.int64],
+        TensorType['P', 'size', 'size', 'size', torch.float32],
     ]:
-        features, labels = [], []
-        for data_dict in batch:
-            feature_patches, label_patches = self.crop_patches(**data_dict)
+        batch_dict = {key: [d[key] for d in batch] for key in batch[0]}
 
-            features.append(feature_patches)
-            labels.append(label_patches)
+        features = torch.cat(batch_dict['features'])
+        labels = torch.cat(batch_dict['labels']) / 3
 
-        return torch.cat(features), torch.cat(labels)
+        return features, labels
 
     def test_collate_fn(
         self,
@@ -153,37 +126,3 @@ class JawFracPatchDataModule(JawFracDataModule):
         shape = batch[0]['shape']
 
         return features, patch_idxs, affine, shape
-
-    def collate_fn(
-        self,
-        batch: List[Dict[str, TensorType[..., Any]]],
-    ) -> Union[
-        Tuple[
-            TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
-            TensorType['P', 'size', 'size', 'size', torch.int64],
-        ],
-        Tuple[
-            TensorType['C', 'D', 'H', 'W', torch.float32],
-            TensorType['P', 3, 2, torch.int64],
-            TensorType['D', 'H', 'W', torch.int64],
-        ],
-        Tuple[
-            TensorType['C', 'D', 'H', 'W', torch.float32],
-            TensorType['P', 3, 2, torch.int64],
-            TensorType[4, 4, torch.float32],
-            TensorType[3, torch.int64],
-        ],
-    ]:
-        stage = self.trainer.state.stage
-        if stage in [
-            RunningStage.SANITY_CHECKING,
-            RunningStage.TRAINING,
-            RunningStage.VALIDATING,
-        ]:
-            return self.fit_collate_fn(batch)
-        elif stage == RunningStage.TESTING:
-            return self.test_collate_fn(batch)
-        elif stage == RunningStage.PREDICTING:
-            return self.predict_collate_fn(batch)
-            
-        raise NotImplementedError(f'No collation available for {stage} stage.')

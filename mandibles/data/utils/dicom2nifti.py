@@ -132,7 +132,7 @@ class DICOM:
 
     @staticmethod
     def read_file(path: Path):
-        ds = pydicom.read_file(path)
+        ds = pydicom.dcmread(path)
 
         image = DICOM.rescale_intensities(ds)
         spacing = DICOM.voxel_spacing(ds)
@@ -285,7 +285,7 @@ def remove_nifti_files(root: Path) -> None:
 
 def write_nifti_files(root: Path) -> None:    
     dirs = sorted([p for p in root.glob('*') if p.is_dir()])
-    dirs = dirs[250:]
+    dirs = dirs[880:]
     dir_iter = tqdm(p.imap(convert_case, dirs), total=len(dirs))
     for i, dir_path in enumerate(dir_iter):
 
