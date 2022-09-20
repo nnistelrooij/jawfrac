@@ -30,8 +30,8 @@ class JawFracDataset(MeshDataset):
             *((
                 T.PositivePatchIndices(patch_size=patch_size),
                 T.NegativeIndices(),
-                T.ExpandLabel(bone_iters=1, all_iters=1),
             ) if stage == 'fit' else ()),
+            # T.ExpandLabel(bone_iters=1, all_iters=1) if stage != 'predict' else dict,
         )
 
         super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)

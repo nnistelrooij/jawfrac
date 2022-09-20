@@ -1,5 +1,3 @@
-from typing import Any
-
 import torch
 from torchtyping import TensorType
 
@@ -18,11 +16,11 @@ class FracPrecision(FracRecall):
 
         pred_centroids = self.cluster_centroids(pred)
         target_centroids = self.cluster_centroids(target)
-
-        _, sq_dists = target_centroids.neighbors(pred_centroids, k=1)
+        
+        ious = self.compute_ious(pred_centroids, target_centroids)
     
         self.total += pred_centroids.num_points
-        self.pos += torch.sum(torch.sqrt(sq_dists) < self.dist_thresh)
+        self.pos += torch.sum(ious.amax(dim=1) >= self.iou_thresh)
 
     def compute(self) -> TensorType[torch.float32]:
         return self.pos / self.total

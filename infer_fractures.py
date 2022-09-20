@@ -17,7 +17,7 @@ def infer():
     )
 
     model = SemSegModule.load_from_checkpoint(
-        'checkpoints/fractures.ckpt',
+        'checkpoints/fractures6.ckpt',
         in_channels=dm.num_channels,
         num_classes=dm.num_classes,
         **config['model'],

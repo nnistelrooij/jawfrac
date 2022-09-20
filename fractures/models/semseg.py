@@ -11,6 +11,7 @@ from torch_scatter import scatter_mean
 
 from fractures.metrics import FracPrecision, FracRecall
 import fractures.nn as nn
+from fractures.visualization import draw_positive_voxels
 from mandibles.models.mandiblepatchseg import (
     batch_forward,
     fill_source_volume,
@@ -122,7 +123,11 @@ class SemSegModule(pl.LightningModule):
         x = self(x)
 
         loss = self.criterion(x, y)
-        self.f1((x >= 0).long().flatten(), (y > 0).long().flatten())
+        x = torch.sigmoid(x) >= self.conf_thresh
+        self.f1(
+            x.long().flatten(),
+            (y > 0).long().flatten(),
+        )
 
         self.log('loss/val', loss)
         self.log('f1/val', self.f1)
@@ -147,6 +152,11 @@ class SemSegModule(pl.LightningModule):
         out = torch.full_like(features[0], -float('inf'))
         for slices, seg in zip(patch_slices, seg):
             out[slices] = torch.maximum(out[slices], seg)
+
+        # # compute mean of overlapping predictions
+        # out = torch.zeros_like(features[0])
+        # for slices, seg in zip(patch_slices, seg):
+        #     out[slices] += seg
 
         return out
 
@@ -176,6 +186,8 @@ class SemSegModule(pl.LightningModule):
         self.log('f1/test', self.f1)
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall)
+        
+        # draw_positive_voxels([mask, target])
 
     def predict_step(
         self,

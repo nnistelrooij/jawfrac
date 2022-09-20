@@ -19,11 +19,16 @@ class UNet(nn.Module):
         in_channels: int,
         num_classes: int,
         channels_list: List[int],
+        num_awms: int,
     ) -> None:
         super().__init__()
 
+        # self.gapm = GrayscaleAdaptivePerceptionModule(
+        #     num_awms=num_awms,
+        # )
+
         self.encoder = Encoder(
-            in_channels,
+            1,
             [16, 32, 64, 128],
         )
 
@@ -39,6 +44,7 @@ class UNet(nn.Module):
         TensorType['B', 'C', 'D', 'H', 'W', torch.float32],
         TensorType['B', 'C', 'D', 'H', 'W', torch.float32],
     ]:
+        # x = self.gapm(x)
         xs = self.encoder(x)
         x = self.decoder(xs)
 
@@ -55,13 +61,11 @@ class MandibleNet(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.gapm = GrayscaleAdaptivePerceptionModule(
-            num_awms=num_awms,
-        )
         self.unet = UNet(
-            in_channels=num_awms,
+            in_channels=1,
             num_classes=num_classes,
             channels_list=channels_list,
+            num_awms=num_awms,
         )
 
         self.loc_head = nn.Sequential(

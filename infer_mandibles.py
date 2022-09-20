@@ -1,5 +1,6 @@
 import pytorch_lightning as pl
 import yaml
+import torch
 from tqdm import tqdm
 
 from mandibles.datamodules import MandiblePatchSegDataModule
@@ -22,6 +23,7 @@ def infer():
         num_classes=dm.num_classes,
         **config['model'],
     )
+    torch.save(model.model.unet.state_dict(), 'checkpoints/unet.ckpt')
 
     trainer = pl.Trainer(
         accelerator='gpu',

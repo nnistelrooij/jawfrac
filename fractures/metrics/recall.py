@@ -15,12 +15,12 @@ class FracRecall(Metric):
 
     def __init__(
         self,
-        dist_thresh: float=25.0,
+        iou_thresh: float=0.2,
         max_neighbor_dist: float=10.0,
     ):
         super().__init__()
 
-        self.dist_thresh = dist_thresh
+        self.iou_thresh = iou_thresh
         self.max_neighbor_dist = max_neighbor_dist
         
         self.add_state('pos', default=torch.tensor(0), dist_reduce_fx='sum')
@@ -41,7 +41,30 @@ class FracRecall(Metric):
             dim=0,
         )
 
-        return PointTensor(centroids)
+        pt = PointTensor(centroids)
+        for i in range(cluster_idxs.max() + 1):
+            pt.cache[f'voxels_{i}'] = voxels[cluster_idxs == i]
+
+        return pt
+
+    def compute_ious(
+        self,
+        pred: PointTensor,
+        target: PointTensor,
+    ) -> TensorType['P', 'T', torch.float32]:
+        ious = torch.empty(pred.num_points, target.num_points)
+        for i in range(pred.num_points):
+            for j in range(target.num_points):
+                pred_voxels = pred.cache[f'voxels_{i}']
+                target_voxels = target.cache[f'voxels_{j}']
+                voxels = torch.cat((pred_voxels, target_voxels))
+
+                unique, counts = torch.unique(voxels, return_counts=True, dim=0)
+                iou = (counts == 2).sum() / unique.shape[0]
+
+                ious[i, j] = iou
+        
+        return ious
 
     def update(
         self,
@@ -58,9 +81,9 @@ class FracRecall(Metric):
         if not pred_centroids:
             return
 
-        _, sq_dists = pred_centroids.neighbors(target_centroids, k=1)
-
-        self.pos += torch.sum(torch.sqrt(sq_dists) < self.dist_thresh)
+        ious = self.compute_ious(pred_centroids, target_centroids)        
+        
+        self.pos += torch.sum(ious.amax(dim=0) >= self.iou_thresh)
 
     def compute(self) -> TensorType[torch.float32]:
         return self.pos / self.total

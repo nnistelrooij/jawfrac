@@ -14,23 +14,25 @@ class JawFracPatchDataModule(JawFracDataModule):
 
     def __init__(
         self,
+        patch_size: int,
         max_patches_per_scan: int,
         seed: int,
         **dm_cfg: Dict[str, Any],
     ) -> None:
-        super().__init__(seed=seed, **dm_cfg)
+        super().__init__(patch_size=patch_size, seed=seed, **dm_cfg)
 
         self.default_transforms = T.Compose(
             T.IntensityAsFeatures(),
             T.ToTensor(),
         )
 
+        self.patch_size = patch_size
         self.max_patches_per_scan = max_patches_per_scan
 
     def setup(self, stage: Optional[str]=None) -> None:
         if stage is None or stage == 'fit':
             files = self._files('fit')
-            train_files, val_files = self._split(files)
+            train_files, val_files, _ = self._split(files)
 
             rng = np.random.default_rng(self.seed)
             val_transforms = T.Compose(
@@ -43,37 +45,51 @@ class JawFracPatchDataModule(JawFracDataModule):
             train_transforms = T.Compose(
                 T.RandomXAxisFlip(rng=rng),
                 T.RandomPatchTranslate(
-                    max_voxels=self.dataset_cfg['patch_size'] // 4, rng=rng,
+                    max_voxels=self.patch_size // 4, rng=rng,
                 ),
                 val_transforms,
             )
 
             self.train_dataset = JawFracDataset(
                 stage='fit',
-                root=self.root,
                 files=train_files,
                 transform=train_transforms,
                 **self.dataset_cfg,
             )
             self.val_dataset = JawFracDataset(
                 stage='fit',
-                root=self.root,
                 files=val_files,
                 transform=val_transforms,
                 **self.dataset_cfg,
             )
 
-        if stage is None or stage in ['test', 'predict']:
-            stage = stage or 'test'
-            files = self._files(stage)
+            self.trainer.logger.log_hyperparams({
+                'pre_transform': str(self.train_dataset.pre_transform),
+                'train_transform': str(self.train_dataset.transform),
+                'val_transform': str(self.val_dataset.transform),
+            })
 
-            setattr(self, f'{stage}_dataset', JawFracDataset(
-                stage=stage,
-                root=self.root,
+
+        if stage is None or stage =='test':
+            files = self._files('test')
+            _, files, _ = self._split(files)
+
+            self.test_dataset = JawFracDataset(
+                stage='test',
                 files=files,
                 transform=self.default_transforms,
                 **self.dataset_cfg,
-            ))
+            )
+
+        if stage is None or stage == 'predict':
+            files = self._files('predict')
+
+            self.predict_dataset = JawFracDataset(
+                stage='predict',
+                files=files,
+                transform=self.default_transforms,
+                **self.dataset_cfg,
+            )
 
     @property
     def num_channels(self) -> int:
@@ -93,7 +109,7 @@ class JawFracPatchDataModule(JawFracDataModule):
         batch_dict = {key: [d[key] for d in batch] for key in batch[0]}
 
         features = torch.cat(batch_dict['features'])
-        labels = torch.cat(batch_dict['labels']) / 3
+        labels = (torch.cat(batch_dict['labels']) > 0).long()
 
         return features, labels
 

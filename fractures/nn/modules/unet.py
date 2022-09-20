@@ -17,7 +17,7 @@ class FracNet(nn.Module):
         self.unet = UNet(**model_cfg)
         if state_dict_path:
             checkpoint = torch.load(state_dict_path)
-            self.load_state_dict(checkpoint['state_dict'])
+            self.unet.load_state_dict(checkpoint)
 
         self.head = nn.Conv3d(32, 1, 3, padding=1)
 
