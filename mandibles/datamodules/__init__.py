@@ -1,2 +1,0 @@
-from mandibles.datamodules.mandibleseg import MandibleSegDataModule
-from mandibles.datamodules.mandiblepatchseg import MandiblePatchSegDataModule

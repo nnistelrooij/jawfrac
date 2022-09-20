@@ -3,22 +3,22 @@ import yaml
 import torch
 from tqdm import tqdm
 
-from mandibles.datamodules import MandiblePatchSegDataModule
-from mandibles.models import MandiblePatchSegModule
+from jawfrac.datamodules import MandibleSegDataModule
+from jawfrac.models import MandibleSegModule
 import nibabel
 import numpy as np
 
 
 def infer():
-    with open('mandibles/config/patchseg.yaml', 'r') as f:
+    with open('jawfrac/config/mandibles.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     config['datamodule']['batch_size'] = 1
-    dm = MandiblePatchSegDataModule(
+    dm = MandibleSegDataModule(
         seed=config['seed'], **config['datamodule'],
     )
 
-    model = MandiblePatchSegModule.load_from_checkpoint(
+    model = MandibleSegModule.load_from_checkpoint(
         'checkpoints/mandibles_positions3.ckpt',
         num_classes=dm.num_classes,
         **config['model'],

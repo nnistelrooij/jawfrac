@@ -3,21 +3,21 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 import yaml
 
-from fractures.datamodules import JawFracPatchDataModule
-from fractures.models.semseg import SemSegModule
+from jawfrac.datamodules import JawFracDataModule
+from jawfrac.models import JawFracModule
 
 
 def train():
-    with open('fractures/config/patchseg.yaml', 'r') as f:
+    with open('jawfrac/config/fractures.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     pl.seed_everything(config['seed'], workers=True)
 
-    dm = JawFracPatchDataModule(
+    dm = JawFracDataModule(
         seed=config['seed'], **config['datamodule'],
     )
 
-    model = SemSegModule(
+    model = JawFracModule(
         in_channels=dm.num_channels,
         num_classes=dm.num_classes,
         **config['model'],

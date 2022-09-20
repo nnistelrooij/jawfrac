@@ -3,21 +3,21 @@ import numpy as np
 import pytorch_lightning as pl
 import yaml
 
-from fractures.datamodules import JawFracPatchDataModule
-from fractures.models import SemSegModule
+from jawfrac.datamodules import JawFracDataModule
+from jawfrac.models import JawFracModule
 
 
 def infer():
-    with open('fractures/config/patchseg.yaml', 'r') as f:
+    with open('jawfrac/config/fractures.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     config['datamodule']['batch_size'] = 1
-    dm = JawFracPatchDataModule(
+    dm = JawFracDataModule(
         seed=config['seed'], **config['datamodule'],
     )
 
-    model = SemSegModule.load_from_checkpoint(
-        'checkpoints/fractures6.ckpt',
+    model = JawFracModule.load_from_checkpoint(
+        'checkpoints/fractures.ckpt',
         in_channels=dm.num_channels,
         num_classes=dm.num_classes,
         **config['model'],

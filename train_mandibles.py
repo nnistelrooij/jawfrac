@@ -3,21 +3,21 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 import yaml
 
-from mandibles.datamodules import MandiblePatchSegDataModule
-from mandibles.models import MandiblePatchSegModule
+from jawfrac.datamodules import MandibleSegDataModule
+from jawfrac.models import MandibleSegModule
 
 
 def train():
-    with open('mandibles/config/patchseg.yaml', 'r') as f:
+    with open('jawfrac/config/mandibles.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     pl.seed_everything(config['seed'], workers=True)
 
-    dm = MandiblePatchSegDataModule(
+    dm = MandibleSegDataModule(
         seed=config['seed'], **config['datamodule'],
     )
 
-    model = MandiblePatchSegModule(
+    model = MandibleSegModule(
         num_classes=dm.num_classes,
         **config['model'],
     )
