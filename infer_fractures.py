@@ -8,7 +8,7 @@ from jawfrac.models import JawFracModule
 
 
 def infer():
-    with open('jawfrac/config/fractures.yaml', 'r') as f:
+    with open('jawfrac/config/jawfrac.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     config['datamodule']['batch_size'] = 1

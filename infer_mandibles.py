@@ -19,7 +19,7 @@ def infer():
     )
 
     model = MandibleSegModule.load_from_checkpoint(
-        'checkpoints/mandibles_positions3.ckpt',
+        'checkpoints/mandibles_positions.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )

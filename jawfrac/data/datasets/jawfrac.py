@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import nibabel
 import numpy as np
@@ -19,6 +19,7 @@ class JawFracDataset(VolumeDataset):
         regular_spacing: float,
         patch_size: int,
         stride: int,
+        expand_label: Dict[str, int],
         **kwargs: Dict[str, Any],
     ) -> None:
         pre_transform = T.Compose(
@@ -31,7 +32,7 @@ class JawFracDataset(VolumeDataset):
                 T.PositivePatchIndices(patch_size=patch_size),
                 T.NegativeIndices(),
             ) if stage == 'fit' else ()),
-            # T.ExpandLabel(bone_iters=1, all_iters=1) if stage != 'predict' else dict,
+            T.ExpandLabel(**expand_label) if stage != 'predict' else dict,
         )
 
         super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)
@@ -44,13 +45,17 @@ class JawFracDataset(VolumeDataset):
         img = nibabel.load(self.root / scan_file)
         intensities = np.asarray(img.dataobj)
 
+        # convert 8-bit to 12-bit
+        if intensities.min() == 0 and intensities.max() == 255:
+            intensities = intensities / 255 * 4095 - 1024
+
         seg = nibabel.load(self.root / mandible_file)
         mask = np.asarray(seg.dataobj) == 1
 
         print(scan_file.parent.stem)
 
         return {
-            'intensities': intensities,
+            'intensities': intensities.astype(np.int16),
             'mandible': mask,
             'spacing': np.array(img.header.get_zooms()),
             'orientation': nibabel.io_orientation(img.affine),
@@ -62,8 +67,8 @@ class JawFracDataset(VolumeDataset):
         file: Path,
     ) -> Dict[str, NDArray[np.int16]]:
         seg = nibabel.load(self.root / file)
-        labels = np.asarray(seg.dataobj, dtype=np.int16)
+        labels = np.asarray(seg.dataobj)
 
         return {
-            'labels': labels,
+            'labels': labels.astype(np.int16),
         }

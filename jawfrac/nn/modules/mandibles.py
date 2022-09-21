@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from torchtyping import TensorType
 
+from jawfrac.nn.modules.loss import SegmentationLoss
 from jawfrac.nn.modules.unet import UNet
 
 
@@ -41,7 +42,6 @@ class MandibleNet(nn.Module):
         TensorType['B', 3, torch.float32],
         TensorType['B', 'C', 'D', 'H', 'W', torch.float32],
     ]:
-        x = self.gapm(x)
         encoding, x = self.unet(x)
 
         embedding = encoding.mean(axis=(2, 3, 4))
@@ -55,14 +55,12 @@ class MandibleLoss(nn.Module):
 
     def __init__(
         self,
-        alpha: float,
-        gamma: float,
+        focal_loss: bool,
+        dice_loss: bool,
     ) -> None:
         super().__init__()
 
-        self.alpha = alpha
-        self.gamma = gamma
-        self.bce = nn.BCEWithLogitsLoss(reduction='none')
+        self.seg_criterion = SegmentationLoss(focal_loss, dice_loss)
         self.smooth_l1 = nn.SmoothL1Loss()
 
     def forward(
@@ -80,14 +78,7 @@ class MandibleLoss(nn.Module):
         y_coords, y_seg = y
 
         coords_loss = self.smooth_l1(coords, y_coords)
-
-        seg_loss = self.bce(seg, y_seg.float())
-
-        probs = torch.sigmoid(seg)
-        pt = y_seg * probs + (1 - y_seg) * (1 - probs)
-        alphat = y_seg * self.alpha + (1 - y_seg) * (1 - self.alpha)
-        seg_loss *= alphat * (1 - pt) ** self.gamma
-        seg_loss = seg_loss.mean()
+        seg_loss = self.seg_criterion(seg, y_seg)
 
         loss = coords_loss + seg_loss
         log_dict = {

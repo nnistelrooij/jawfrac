@@ -8,7 +8,7 @@ from jawfrac.models import JawFracModule
 
 
 def train():
-    with open('jawfrac/config/fractures.yaml', 'r') as f:
+    with open('jawfrac/config/jawfrac.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     pl.seed_everything(config['seed'], workers=True)

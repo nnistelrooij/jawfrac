@@ -29,31 +29,3 @@ class FracNet(nn.Module):
         seg = self.head(x)
 
         return seg.squeeze(dim=1)
-
-
-class FocalLoss(nn.Module):
-
-    def __init__(
-        self,
-        alpha: float,
-        gamma: float,
-    ) -> None:
-        super().__init__()
-
-        self.alpha = alpha
-        self.gamma = gamma
-        self.bce = nn.BCEWithLogitsLoss(reduction='none')
-
-    def forward(
-        self,
-        x: TensorType['B', 'D', 'H', 'W', torch.float32],
-        y: TensorType['B', 'D', 'H', 'W', torch.int64],
-    ) -> TensorType[torch.float32]:
-        bce_loss = self.bce(x, y.float())
-
-        probs = torch.sigmoid(x)
-        pt = y * probs + (1 - y) * (1 - probs)
-        alphat = y * self.alpha + (1 - y) * (1 - self.alpha)
-        bce_loss *= alphat * (1 - pt) ** self.gamma
-
-        return bce_loss.mean()

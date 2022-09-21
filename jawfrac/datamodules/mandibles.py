@@ -1,37 +1,51 @@
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from pytorch_lightning.trainer.states import RunningStage
 import torch
 from torchtyping import TensorType
 
 from jawfrac.data.datasets.mandibles import MandibleSegDataset
 import jawfrac.data.transforms as T
 from jawfrac.datamodules.base import VolumeDataModule
+from jawfrac.datamodules.jawfrac import JawFracDataModule
 
 
 class MandibleSegDataModule(VolumeDataModule):
 
     def __init__(
         self,
+        root: Union[str, Path],
+        patch_size: int,
         max_patches_per_scan: int,
         **dm_cfg: Dict[str, Any],
     ) -> None:
-        super().__init__(**dm_cfg)
+        # use files functions from JawFrac when inferring for fracture data
+        if 'fractures' in str(root):
+            def _files(self, stage: str):
+                files = JawFracDataModule._files(self, stage)
+                return list(map(lambda t: t[:1], files))
+            self._files = partial(_files, self)
+            self._filter_files = partial(JawFracDataModule._filter_files, self)
+
+        super().__init__(
+            exclude=[],
+            root=root,
+            patch_size=patch_size,
+            **dm_cfg,
+        )
 
         self.default_transforms = T.Compose(
             T.IntensityAsFeatures(),
             T.ToTensor(),
         )
 
+        self.patch_size = patch_size
         self.max_patches_per_scan = max_patches_per_scan
 
-    def _filter_files(
-        self,
-        pattern: str,
-    ) -> List[Tuple[Path, ...]]:
+    def _filter_files(self, pattern: str) -> List[Path]:
         files = super()._filter_files(pattern)
         
         df = pd.read_csv(self.root / 'Fabian overview.csv')
@@ -44,10 +58,7 @@ class MandibleSegDataModule(VolumeDataModule):
 
         return files
 
-    def _files(
-        self,
-        stage: str,
-    ) -> List[Tuple[Path, ...]]:
+    def _files(self, stage: str) -> List[Tuple[Path, ...]]:
         scan_files = self._filter_files('**/image.nii.gz')
 
         if stage == 'predict':
@@ -74,7 +85,7 @@ class MandibleSegDataModule(VolumeDataModule):
             train_transforms = T.Compose(
                 T.RandomXAxisFlip(rng=rng),
                 T.RandomPatchTranslate(
-                    max_voxels=self.dataset_cfg['patch_size'] // 4, rng=rng,
+                    max_voxels=self.patch_size // 4, rng=rng,
                 ),
                 val_transforms,
             )
@@ -106,7 +117,7 @@ class MandibleSegDataModule(VolumeDataModule):
         if stage is None or stage == 'predict':
             files = self._files('predict')
 
-            self.test_dataset = MandibleSegDataset(
+            self.predict_dataset = MandibleSegDataset(
                 stage='predict',
                 files=files,
                 transform=self.default_transforms,

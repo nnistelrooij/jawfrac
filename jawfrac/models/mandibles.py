@@ -151,12 +151,14 @@ class MandibleSegModule(pl.LightningModule):
         epochs: int,
         warmup_epochs: int,
         weight_decay: float,
+        focal_loss: bool,
+        dice_loss: bool,
         **model_cfg: Dict[str, Any],
     ) -> None:
         super().__init__()
 
         self.model = nn.MandibleNet(**model_cfg)
-        self.criterion = nn.MandibleLoss(alpha=0.25, gamma=2.0)
+        self.criterion = nn.MandibleLoss(focal_loss, dice_loss)
         self.f1 = F1Score(num_classes=2, average='macro')
 
         self.lr = lr
@@ -257,11 +259,11 @@ class MandibleSegModule(pl.LightningModule):
         ],
         batch_idx: int,
     ) -> None:
-        features, patch_idxs, patch_coords, labels = batch
+        features, patch_idxs, _, labels = batch
 
         # predict binary segmentation
-        coodrs, seg = self.predict_volumes(features, patch_idxs)
-        mask = torch.sigmoid(seg) > 0.5
+        _, seg = self.predict_volumes(features, patch_idxs)
+        mask = seg >= 0
 
         # compute metrics
         self.f1(mask.long().flatten(), labels.flatten())

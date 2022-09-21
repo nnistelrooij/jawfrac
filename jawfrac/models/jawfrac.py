@@ -18,6 +18,7 @@ from jawfrac.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearWarmupLR,
 )
+from jawfrac.visualization import draw_positive_voxels
 
 
 def filter_connected_components(
@@ -62,6 +63,8 @@ class JawFracModule(pl.LightningModule):
         epochs: int,
         warmup_epochs: int,
         weight_decay: float,
+        focal_loss: bool,
+        dice_loss: bool,
         conf_threshold: float,
         min_component_size: int,
         **model_cfg: Dict[str, Any],
@@ -69,7 +72,7 @@ class JawFracModule(pl.LightningModule):
         super().__init__()
 
         self.model = nn.FracNet(**model_cfg)
-        self.criterion = nn.FocalLoss(alpha=0.25, gamma=2.0)
+        self.criterion = nn.SegmentationLoss(focal_loss, dice_loss)
         self.f1 = F1Score(num_classes=2, average='macro')
         self.precision_metric = FracPrecision()
         self.recall = FracRecall()
@@ -101,7 +104,7 @@ class JawFracModule(pl.LightningModule):
 
         x = self(x)
 
-        loss = self.criterion(x, y)
+        loss = self.criterion(x, y.float())
 
         self.log('loss/train', loss)
 
@@ -119,7 +122,7 @@ class JawFracModule(pl.LightningModule):
 
         x = self(x)
 
-        loss = self.criterion(x, y)
+        loss = self.criterion(x, y.float())
         x = torch.sigmoid(x) >= self.conf_thresh
         self.f1(
             x.long().flatten(),
@@ -184,7 +187,7 @@ class JawFracModule(pl.LightningModule):
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall)
         
-        # draw_positive_voxels([mask, target])
+        draw_positive_voxels([mask, target])
 
     def predict_step(
         self,

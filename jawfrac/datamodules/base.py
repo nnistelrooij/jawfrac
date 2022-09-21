@@ -1,8 +1,7 @@
 from pathlib import Path
 import re
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple
 
-import pandas as pd
 import pytorch_lightning as pl
 from sklearn.model_selection import ShuffleSplit
 from torch.utils.data import DataLoader, Dataset
@@ -13,6 +12,7 @@ class VolumeDataModule(pl.LightningDataModule):
 
     def __init__(
         self,
+        exclude: List[str],
         regex_filter: str,
         val_size: float,
         test_size: float,
@@ -26,6 +26,7 @@ class VolumeDataModule(pl.LightningDataModule):
         super().__init__()
         
         self.root = Path(dataset_cfg['root'])
+        self.exclude = '.*/' + '/.*|.*/'.join(exclude) + '/.*'
         self.filter = regex_filter
         self.val_size = val_size
         self.test_size = test_size
@@ -39,11 +40,10 @@ class VolumeDataModule(pl.LightningDataModule):
     def _filter_files(
         self,
         pattern: str,
-        exclude: List[str]=[],
     ) -> List[Path]:
         files = sorted(self.root.glob(pattern))
         files = [f for f in files if re.search(self.filter, str(f))]
-        files = [f for f in files if f.parent.name not in exclude]
+        files = [f for f in files if re.search(self.exclude, str(f)) is None]
         files = [f.relative_to(self.root) for f in files]
 
         return files
@@ -54,13 +54,16 @@ class VolumeDataModule(pl.LightningDataModule):
     ) -> Tuple[
         List[Tuple[Path, ...]],
         List[Tuple[Path, ...]],
-        List[Tuple[Path, ...]]
+        List[Tuple[Path, ...]],
     ]:
         val_files = len(files) * self.val_size
-        if val_files < 1:
-            return files, []
+        test_files = len(files) * self.test_size
+        if val_files < 1 and test_files < 1:
+            return files, [], []
         elif val_files > len(files) - 1:
-            return [], files
+            return [], files, []
+        elif test_files > len(files) - 1:
+            return [], [], files
     
         ss = ShuffleSplit(
             n_splits=1,
@@ -71,6 +74,11 @@ class VolumeDataModule(pl.LightningDataModule):
 
         train_files = [files[i] for i in train_idxs]
         val_test_files = [files[i] for i in val_test_idxs]
+
+        if val_files > len(val_test_files) - 1:
+            return train_files, val_test_files, [],
+        elif test_files > len(val_test_files) - 1:
+            return train_files, [], val_test_files
     
         ss = ShuffleSplit(
             n_splits=1,

@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from pytorch_lightning.trainer.states import RunningStage
 import torch
 from torchtyping import TensorType
 
@@ -17,11 +16,21 @@ class JawFracDataModule(VolumeDataModule):
     def __init__(
         self,
         patch_size: int,
+        expand_label: Dict[str, int],
         max_patches_per_scan: int,
         seed: int,
         **dm_cfg: Dict[str, Any],
     ) -> None:
-        super().__init__(patch_size=patch_size, seed=seed, **dm_cfg)
+        super().__init__(
+            exclude=[
+                '12', '103', '123', '125', '128',
+                '130', '148', '155', '171', '186',
+            ],
+            patch_size=patch_size,
+            expand_label=expand_label,
+            seed=seed,
+            **dm_cfg,
+        )
 
         self.default_transforms = T.Compose(
             T.IntensityAsFeatures(),
@@ -29,20 +38,14 @@ class JawFracDataModule(VolumeDataModule):
         )
 
         self.patch_size = patch_size
+        self.expand_label = expand_label
         self.max_patches_per_scan = max_patches_per_scan
 
-    def _filter_files(
-        self,
-        pattern: str,
-        exclude: List[str]=[
-            '12', '103', '123', '125', '128', '130', '148', '155', '171', '186',
-        ],
-    ) -> List[Path]:
-        files = super()._filter_files(pattern, exclude)
+    def _filter_files(self, pattern: str) -> List[Path]:
+        files = super(type(self), self)._filter_files(pattern)
 
         df = pd.read_csv(self.root / 'Sophie overview.csv')
-        mask = pd.isna(df['HU']) & pd.isna(df['Dislocated'])
-        idxs = mask.index[mask]
+        idxs = df.index[pd.isna(df['HU']) & pd.isna(df['Dislocated'])]
 
         patients = list(map(lambda p: int(p.parent.stem), files))
         files = [f for f, p in zip(files, patients) if p - 1 in idxs]
@@ -143,7 +146,9 @@ class JawFracDataModule(VolumeDataModule):
         batch_dict = {key: [d[key] for d in batch] for key in batch[0]}
 
         features = torch.cat(batch_dict['features'])
-        labels = (torch.cat(batch_dict['labels']) > 0).long()
+
+        count = sum(iters > 0 for iters in self.expand_label.values())
+        labels = torch.cat(batch_dict['labels']) / (count + 1)
 
         return features, labels
 
@@ -157,7 +162,7 @@ class JawFracDataModule(VolumeDataModule):
     ]:
         features = batch[0]['features']
         patch_idxs = batch[0]['patch_idxs']
-        labels = batch[0]['labels']
+        labels = batch[0]['labels'] > 0
         
         return features, patch_idxs, labels
 

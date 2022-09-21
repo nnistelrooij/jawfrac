@@ -28,13 +28,7 @@ def train():
         version=config['version'],
         default_hp_metric=False,
     )
-
-    # dm.setup('fit')
-    # config['datamodule']['pre_transform'] = repr(dm.train_dataset.pre_transform)
-    # config['datamodule']['train_transform'] = repr(dm.train_dataset.transform)
-    # config['datamodule']['val_transform'] = repr(dm.val_dataset.transform)
     logger.log_hyperparams(config)
-
 
 
     epoch_checkpoint_callback = ModelCheckpoint(
