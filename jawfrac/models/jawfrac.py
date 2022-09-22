@@ -18,7 +18,11 @@ from jawfrac.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearWarmupLR,
 )
-from jawfrac.visualization import draw_positive_voxels
+from jawfrac.visualization import (
+    draw_confusion_matrix,
+    draw_fracture_result,
+    draw_positive_voxels,
+)
 
 
 def filter_connected_components(
@@ -46,6 +50,7 @@ def filter_connected_components(
         src=probs.flatten(),
         index=component_idxs.flatten(),
     )
+    print(probs.amax())
     prob_mask = component_probs >= conf_thresh
 
     # project masks back to volume
@@ -73,6 +78,7 @@ class JawFracModule(pl.LightningModule):
 
         self.model = nn.FracNet(**model_cfg)
         self.criterion = nn.SegmentationLoss(focal_loss, dice_loss)
+        self.confmat = ConfusionMatrix(num_classes=2)
         self.f1 = F1Score(num_classes=2, average='macro')
         self.precision_metric = FracPrecision()
         self.recall = FracRecall()
@@ -164,12 +170,13 @@ class JawFracModule(pl.LightningModule):
         self,
         batch: Tuple[
             TensorType['C', 'D', 'H', 'W', torch.float32],
+            TensorType['D', 'H', 'W', torch.bool],
             TensorType['P', 3, 2, torch.int64],
-            TensorType['D', 'H', 'W', torch.int64],
+            TensorType['D', 'H', 'W', torch.bool],
         ],
         batch_idx: int,
     ) -> None:
-        features, patch_idxs, target = batch
+        features, mandible, patch_idxs, target = batch
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)
@@ -178,7 +185,11 @@ class JawFracModule(pl.LightningModule):
         )
 
         # compute metrics
-        self.f1(mask.long().flatten(), (target > 0).long().flatten())
+        self.confmat(
+            torch.any(mask)[None].long(),
+            torch.any(target)[None].long(),
+        )
+        self.f1(mask.long().flatten(), target.long().flatten())
         self.precision_metric(mask, target)
         self.recall(mask, target)
         
@@ -187,7 +198,10 @@ class JawFracModule(pl.LightningModule):
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall)
         
-        draw_positive_voxels([mask, target])
+        draw_fracture_result(mandible, mask, target)
+
+    def test_epoch_end(self, _) -> None:
+        draw_confusion_matrix(self.confmat)
 
     def predict_step(
         self,
@@ -207,6 +221,8 @@ class JawFracModule(pl.LightningModule):
         mask = filter_connected_components(
             x ,self.conf_thresh, self.min_component_size,
         )
+
+        draw_positive_voxels(mask)
 
         out = fill_source_volume(mask, affine, shape)
         

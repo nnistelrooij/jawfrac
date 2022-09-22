@@ -15,12 +15,16 @@ class FracPrecision(FracRecall):
             return
 
         pred_voxels = self.cluster_voxels(pred)
+        self.total += len(pred_voxels)
+
+        if not torch.any(target):
+            return
+
         target_voxels = self.cluster_voxels(target)
         
         ious = self.compute_ious(pred_voxels, target_voxels)
     
-        self.total += len(pred_voxels)
         self.pos += torch.sum(ious.amax(dim=1) >= self.iou_thresh)
 
     def compute(self) -> TensorType[torch.float32]:
-        return self.pos / self.total
+        return self.pos / (self.total + 1e-6)

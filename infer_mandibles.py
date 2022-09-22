@@ -19,29 +19,29 @@ def infer():
     )
 
     model = MandibleSegModule.load_from_checkpoint(
-        'checkpoints/mandibles_positions.ckpt',
+        'checkpoints/mandibles_positions_no_gapm.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )
     torch.save(model.model.unet.state_dict(), 'checkpoints/unet.ckpt')
 
     trainer = pl.Trainer(
-        accelerator='gpu',
-        devices=1,
+        # accelerator='gpu',
+        # devices=1,
         max_epochs=config['model']['epochs'],
     )
     preds = trainer.predict(model, datamodule=dm)
 
     for i, volume in enumerate(tqdm(preds, desc='Writing NIfTI files')):
         # get original scan
-        path = dm.root / dm.predict_dataset.files[i]
+        path = dm.root / dm.predict_dataset.files[i][0]
         img = nibabel.load(path)
         affine = img.affine
 
         # save to storage
         volume = volume.cpu().numpy().astype(np.uint16)
         img = nibabel.Nifti1Image(volume, affine)
-        nibabel.save(img, path.parent / 'mandible.nii.gz')
+        nibabel.save(img, path.parent / 'mandible2.nii.gz')
 
 
 if __name__ == '__main__':

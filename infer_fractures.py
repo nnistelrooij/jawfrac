@@ -24,8 +24,8 @@ def infer():
     )
 
     trainer = pl.Trainer(
-        accelerator='gpu',
-        devices=1,
+        # accelerator='gpu',
+        # devices=1,
         max_epochs=config['model']['epochs'],
     )
     # dm.setup(stage='fit')

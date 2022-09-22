@@ -25,10 +25,10 @@ class UNet(nn.Module):
 
         self.gapm = GrayscaleAdaptivePerceptionModule(
             num_awms=num_awms,
-        ) if num_awms else nn.Identity()
+        ) if num_awms else lambda x: torch.zeros_like(x[:, :0])
 
         self.encoder = Encoder(
-            num_awms or 1,
+            1 + num_awms,
             [16, 32, 64, 128],
         )
 
@@ -44,7 +44,7 @@ class UNet(nn.Module):
         TensorType['B', 'C', 'D', 'H', 'W', torch.float32],
         TensorType['B', 'C', 'D', 'H', 'W', torch.float32],
     ]:
-        x = self.gapm(x)
+        x = torch.cat((x, self.gapm(x)), dim=1)
         xs = self.encoder(x)
         x = self.decoder(xs)
 

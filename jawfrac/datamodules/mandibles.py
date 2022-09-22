@@ -24,10 +24,7 @@ class MandibleSegDataModule(VolumeDataModule):
     ) -> None:
         # use files functions from JawFrac when inferring for fracture data
         if 'fractures' in str(root):
-            def _files(self, stage: str):
-                files = JawFracDataModule._files(self, stage)
-                return list(map(lambda t: t[:1], files))
-            self._files = partial(_files, self)
+            self._files = partial(JawFracDataModule._files, self)
             self._filter_files = partial(JawFracDataModule._filter_files, self)
 
         super().__init__(
@@ -115,7 +112,7 @@ class MandibleSegDataModule(VolumeDataModule):
             )
 
         if stage is None or stage == 'predict':
-            files = self._files('predict')
+            files = self._files('predict')[:20]
 
             self.predict_dataset = MandibleSegDataset(
                 stage='predict',

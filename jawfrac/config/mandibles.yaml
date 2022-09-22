@@ -1,5 +1,5 @@
 work_dir: '/home/mka3dlab/Documents/logs/mandibles'
-version: 17
+version: 21
 seed: 0
 
 model:
@@ -8,14 +8,14 @@ model:
   epochs: 500
   warmup_epochs: 20
   weight_decay: 0
-  num_awms: 3
+  num_awms: 0
   focal_loss: True
   dice_loss: False
 
 datamodule:
   # root: '/mnt/diag/nielsvannistelrooij/Fabian'
   root: '/home/mka3dlab/Documents/fractures'
-  regex_filter: ''
+  regex_filter: 'Annotation UK'
   val_size: 0.2
   test_size: 0.0
   batch_size: 2

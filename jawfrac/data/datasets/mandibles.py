@@ -40,8 +40,12 @@ class MandibleSegDataset(VolumeDataset):
         img = nibabel.load(self.root / file)
         intensities = np.asarray(img.dataobj)
 
+        # convert 8-bit to 12-bit
+        if intensities.min() == 0 and intensities.max() == 255:
+            intensities = intensities / 255 * 4096 - 624
+
         return {
-            'intensities': intensities,
+            'intensities': intensities.astype(np.int16),
             'spacing': np.array(img.header.get_zooms()),
             'orientation': nibabel.io_orientation(img.affine),
             'shape': np.array(img.header.get_data_shape()),

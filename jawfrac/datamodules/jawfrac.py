@@ -37,12 +37,16 @@ class JawFracDataModule(VolumeDataModule):
             T.ToTensor(),
         )
 
+        self.count = sum(v > 0 for k, v in expand_label.items() if 'iters' in k)
+        self.count = expand_label['smooth'] * self.count + 1
         self.patch_size = patch_size
-        self.expand_label = expand_label
         self.max_patches_per_scan = max_patches_per_scan
 
     def _filter_files(self, pattern: str) -> List[Path]:
         files = super(type(self), self)._filter_files(pattern)
+
+        if self.filter == 'Controls':
+            return files
 
         df = pd.read_csv(self.root / 'Sophie overview.csv')
         idxs = df.index[pd.isna(df['HU']) & pd.isna(df['Dislocated'])]
@@ -54,6 +58,10 @@ class JawFracDataModule(VolumeDataModule):
 
     def _files(self, stage: str) -> List[Tuple[Path, ...]]:
         scan_files = self._filter_files('**/*main*.nii.gz')
+
+        if not isinstance(self, JawFracDataModule):
+            return list(zip(scan_files))
+
         mandible_files = self._filter_files('**/mandible.nii.gz')
 
         if stage == 'predict':
@@ -146,9 +154,7 @@ class JawFracDataModule(VolumeDataModule):
         batch_dict = {key: [d[key] for d in batch] for key in batch[0]}
 
         features = torch.cat(batch_dict['features'])
-
-        count = sum(iters > 0 for iters in self.expand_label.values())
-        labels = torch.cat(batch_dict['labels']) / (count + 1)
+        labels = torch.cat(batch_dict['labels']) / self.count
 
         return features, labels
 
@@ -157,14 +163,16 @@ class JawFracDataModule(VolumeDataModule):
         batch: List[Dict[str, TensorType[..., Any]]],
     ) -> Tuple[
         TensorType['C', 'D', 'H', 'W', torch.float32],
+        TensorType['D', 'H', 'W', torch.bool],
         TensorType['P', 3, 2, torch.int64],
-        TensorType['D', 'H', 'W', torch.int64],
+        TensorType['D', 'H', 'W', torch.bool],
     ]:
         features = batch[0]['features']
+        mandible = batch[0]['mandible']
         patch_idxs = batch[0]['patch_idxs']
         labels = batch[0]['labels'] > 0
         
-        return features, patch_idxs, labels
+        return features, mandible, patch_idxs, labels
 
     def predict_collate_fn(
         self,

@@ -87,12 +87,11 @@ class MandibleCrop:
     def __call__(
         self,
         intensities: NDArray[Any],
-        mandible: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         # set all intensities outside mandible to -1000
         mandible = ndimage.binary_dilation(
-            input=mandible,
+            input=data_dict['mandible'],
             structure=ndimage.generate_binary_structure(3, 2),
             iterations=10,
         )
@@ -110,7 +109,7 @@ class MandibleCrop:
 
         # crop volumes given padded slices
         data_dict['intensities'] = intensities[padded_slices]
-        data_dict['mandible'] = mandible[padded_slices]
+        data_dict['mandible'] = data_dict['mandible'][padded_slices]
         if 'labels' in data_dict:
             data_dict['labels'] = data_dict['labels'][padded_slices]
 
@@ -135,11 +134,13 @@ class ExpandLabel:
         self,
         bone_iters: int,
         all_iters: int,
+        smooth: bool,
         bone_intensity_threshold: int=300,
     ) -> None:
         self.bone_iters = bone_iters
         self.bone_intensity_thresh = bone_intensity_threshold
         self.all_iters = all_iters
+        self.smooth = smooth
 
     def __call__(
         self,
@@ -157,7 +158,7 @@ class ExpandLabel:
                 iterations=self.bone_iters,
                 mask=intensities >= self.bone_intensity_thresh,
             )
-            out += labels.astype(np.int16)
+            out = self.smooth * out + labels.astype(np.int16)
 
         if self.all_iters:
             labels = ndimage.binary_dilation(
@@ -165,7 +166,7 @@ class ExpandLabel:
                 structure=ndimage.generate_binary_structure(3, 2),
                 iterations=self.all_iters,
             )
-            out += labels.astype(np.int16)
+            out = self.smooth * out + labels.astype(np.int16)
 
         data_dict['intensities'] = intensities
         data_dict['labels'] = out
@@ -176,8 +177,9 @@ class ExpandLabel:
         return '\n'.join([
             self.__class__.__name__ + '(',
             f'    bone_iters={self.bone_iters},',
-            f'    all_iters={self.all_iters},',
             f'    bone_intensity_threshold={self.bone_intensity_thresh},',
+            f'    all_iters={self.all_iters},',
+            f'    smooth={self.smooth},',
             ')',
         ])
 

@@ -61,6 +61,9 @@ class FracRecall(Metric):
         pred: TensorType['D', 'H', 'W', torch.bool],
         target: TensorType['D', 'H', 'W', torch.int64],
     ) -> None:
+        if not torch.any(target):
+            return
+
         target_voxels = self.cluster_voxels(target)
         self.total += len(target_voxels)
 
@@ -76,4 +79,4 @@ class FracRecall(Metric):
         self.pos += torch.sum(ious.amax(dim=0) >= self.iou_thresh)
 
     def compute(self) -> TensorType[torch.float32]:
-        return self.pos / self.total
+        return self.pos / (self.total + 1e-6)

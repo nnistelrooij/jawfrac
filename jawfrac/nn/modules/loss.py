@@ -36,8 +36,8 @@ class SegmentationLoss(nn.Module):
         if self.dice_loss:
             dim = tuple(range(1, len(pred.shape)))
             numerator = 2 * torch.sum(pred * target, dim=dim)
-            denominator = torch.sum(pred + target, dim=dim)
-            dice_loss = 1 - torch.mean((numerator + 1) / (denominator + 1))
+            denominator = torch.sum(pred ** 2 + target ** 2, dim=dim)
+            dice_loss = 1 - torch.mean((numerator + 1e-6) / (denominator + 1e-6))
             loss = dice_loss + 0.5 * loss
         
         return loss

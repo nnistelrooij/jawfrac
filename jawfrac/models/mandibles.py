@@ -18,6 +18,7 @@ from jawfrac.models.common import (
     batch_forward,
     fill_source_volume,
 )
+from jawfrac.visualization import draw_positive_voxels
 
 
 def patches_subgrid(
@@ -270,6 +271,8 @@ class MandibleSegModule(pl.LightningModule):
         
         # log metrics
         self.log('f1/test', self.f1)
+        
+        draw_positive_voxels(mask)
 
     def predict_step(
         self,

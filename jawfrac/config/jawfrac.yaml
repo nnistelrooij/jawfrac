@@ -1,5 +1,5 @@
 work_dir: '/home/mka3dlab/Documents/logs/fractures'
-version: dice_loss
+version: no_smooth_expand_label
 seed: 0
 
 model:
@@ -10,14 +10,14 @@ model:
   weight_decay: 0.0
   num_awms: 0
   state_dict_path: ''  # 'checkpoints/unet.ckpt'
-  focal_loss: False
-  dice_loss: True
+  focal_loss: True
+  dice_loss: False
   conf_threshold: 0.2
   min_component_size: 2048
 
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'
-  regex_filter: ''
+  regex_filter: 'Annotation UK'
   val_size: 0.2
   test_size: 0.0
   batch_size: 4
@@ -31,4 +31,5 @@ datamodule:
   expand_label:
     bone_iters: 1
     all_iters: 1
+    smooth: False
   max_patches_per_scan: 4
