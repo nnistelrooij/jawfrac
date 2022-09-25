@@ -150,7 +150,7 @@ class PSG:
         shape: Tuple[int, int, int],
         obj_type: str,
         obj_id: str,
-        content: NDArray[np.bool_],
+        content: NDArray[np.bool8],
     ):
         self.version = version
         self.shape = shape
@@ -160,7 +160,7 @@ class PSG:
 
         assert version == 2
 
-    def to_numpy(self) -> NDArray[np.bool_]:
+    def to_numpy(self) -> NDArray[np.bool8]:
         out = self.content.reshape(self.shape)
         out = out.transpose(2, 1, 0)[::-1]
 

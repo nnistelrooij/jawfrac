@@ -25,10 +25,8 @@ class MandibleSegDataset(VolumeDataset):
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
             T.PatchIndices(patch_size=patch_size, stride=stride),
-            *((
-                T.BonePatchIndices(),
-                T.PositiveNegativeIndices(),
-            ) if stage == 'fit' else ()),
+            T.BonePatchIndices(),
+            T.PositiveNegativeIndices() if stage == 'fit' else dict,
         )
 
         super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)
@@ -44,6 +42,8 @@ class MandibleSegDataset(VolumeDataset):
         if intensities.min() == 0 and intensities.max() == 255:
             intensities = intensities / 255 * 4096 - 624
 
+        print(file.parent.stem)
+
         return {
             'intensities': intensities.astype(np.int16),
             'spacing': np.array(img.header.get_zooms()),
@@ -54,10 +54,10 @@ class MandibleSegDataset(VolumeDataset):
     def load_target(
         self,
         file: Path,
-    ) -> Dict[str, NDArray[np.int16]]:
+    ) -> Dict[str, NDArray[np.bool8]]:
         seg = nibabel.load(self.root / file)
         labels = np.asarray(seg.dataobj)
 
         return {
-            'labels': (labels == 2).astype(np.int16),
+            'labels': labels == 2,
         }

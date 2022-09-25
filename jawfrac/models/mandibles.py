@@ -103,7 +103,7 @@ def interpolate_positions(
 def filter_connected_components(
     coords: TensorType['D', 'H', 'W', 3, torch.float32],
     seg: TensorType['D', 'H', 'W', torch.float32],
-    conf_thresh: float=0.6,
+    conf_thresh: float=0.5,
 ) -> TensorType['D', 'H', 'W', torch.bool]:
     # determine connected components in volume
     probs = torch.sigmoid(seg)
@@ -184,7 +184,7 @@ class MandibleSegModule(pl.LightningModule):
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
             Tuple[
                 TensorType['P', 3, torch.float32],
-                TensorType['P', 'size', 'size', 'size', torch.int64],
+                TensorType['P', 'size', 'size', 'size', torch.bool],
             ],
         ],
         batch_idx: int,
@@ -208,7 +208,7 @@ class MandibleSegModule(pl.LightningModule):
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
             Tuple[
                 TensorType['P', 3, torch.float32],
-                TensorType['P', 'size', 'size', 'size', torch.int64],
+                TensorType['P', 'size', 'size', 'size', torch.bool],
             ],
         ],
         batch_idx: int,
@@ -218,7 +218,7 @@ class MandibleSegModule(pl.LightningModule):
         coords, seg = self(x)
 
         _, log_dict = self.criterion(coords, seg, y)
-        self.f1((seg >= 0).long().flatten(), y[1].flatten())
+        self.f1((seg >= 0).long().flatten(), y[1].long().flatten())
 
         self.log_dict({
             **{
@@ -255,19 +255,20 @@ class MandibleSegModule(pl.LightningModule):
         batch: Tuple[
             TensorType['C', 'D', 'H', 'W', torch.float32],
             TensorType['P', 3, 2, torch.int64],
-            TensorType['P', 3, torch.float32],
-            TensorType['D', 'H', 'W', torch.int64],
+            TensorType['D', 'H', 'W', torch.bool],
         ],
         batch_idx: int,
     ) -> None:
-        features, patch_idxs, _, labels = batch
+        features, patch_idxs, labels = batch
 
         # predict binary segmentation
-        _, seg = self.predict_volumes(features, patch_idxs)
-        mask = seg >= 0
+        coords, seg = self.predict_volumes(features, patch_idxs)
+
+        # remove small or low-confidence connected components
+        mask = filter_connected_components(coords, seg)
 
         # compute metrics
-        self.f1(mask.long().flatten(), labels.flatten())
+        self.f1(mask.long().flatten(), labels.long().flatten())
         
         # log metrics
         self.log('f1/test', self.f1)

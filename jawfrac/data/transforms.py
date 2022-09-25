@@ -81,8 +81,10 @@ class MandibleCrop:
     def __init__(
         self,
         padding: Union[float, ArrayLike],
+        manifold: bool,
     ) -> None:
         self.padding = padding
+        self.manifold = manifold
 
     def __call__(
         self,
@@ -95,7 +97,8 @@ class MandibleCrop:
             structure=ndimage.generate_binary_structure(3, 2),
             iterations=10,
         )
-        intensities[~mandible] = -1024
+        if self.manifold:
+            intensities[~mandible] = -1024
 
         # find smallest bounding box that encapsulates mandible
         slices = ndimage.find_objects(mandible)[0]
@@ -124,6 +127,7 @@ class MandibleCrop:
         return '\n'.join([
             self.__class__.__name__ + '(',
             f'    padding={self.padding},',
+            f'    manifold={self.manifold},',
             ')',
         ])
 
@@ -324,9 +328,10 @@ class RegularSpacing:
             if key not in data_dict:
                 continue
             
-            min_value, max_value = data_dict[key].min(), data_dict[key].max()
-            data_dict[key] = ndimage.zoom(input=data_dict[key], zoom=zoom)
-            data_dict[key] = np.clip(data_dict[key], min_value, max_value)
+            volume = data_dict[key]
+            volume = ndimage.zoom(input=volume, zoom=zoom, output=float)
+            volume = volume.clip(data_dict[key].min(), data_dict[key].max())
+            data_dict[key] = volume.round().astype(data_dict[key].dtype)
 
         # update voxel spacing accordingly
         data_dict['spacing'] = self.spacing
@@ -449,6 +454,50 @@ class BonePatchIndices:
 
         data_dict['intensities'] = intensities
         data_dict['patch_idxs'] = np.stack(bone_patch_idxs)
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    intensity_threshold={self.intensity_thresh},',
+            f'    volume_threshold={self.volume_thresh},',
+            ')',
+        ])
+
+
+class MandiblePatchIndices:
+
+    def __init__(
+        self,
+        intensity_threshold: int=300,
+        volume_threshold: float=0.01,
+    ) -> None:
+        self.intensity_thresh = intensity_threshold
+        self.volume_thresh = volume_threshold
+
+    def __call__(
+        self,
+        intensities,
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        mandible = ndimage.binary_dilation(
+            input=data_dict['mandible'],
+            structure=ndimage.generate_binary_structure(3, 2),
+            iterations=10,
+        )
+
+        mandible_patch_idxs = []
+        for patch_idxs in data_dict['patch_idxs']:
+            slices = tuple(slice(start, stop) for start, stop in patch_idxs)
+            patch = intensities[slices]
+
+            mandible_mask = mandible[slices] & (patch >= self.intensity_thresh)
+            if mandible_mask.mean() >= self.volume_thresh:
+                mandible_patch_idxs.append(patch_idxs)
+
+        data_dict['intensities'] = intensities
+        data_dict['patch_idxs'] = np.stack(mandible_patch_idxs)
 
         return data_dict
 

@@ -68,6 +68,7 @@ class JawFracModule(pl.LightningModule):
         epochs: int,
         warmup_epochs: int,
         weight_decay: float,
+        two_stage: Dict[str, Any],
         focal_loss: bool,
         dice_loss: bool,
         conf_threshold: float,
@@ -76,8 +77,14 @@ class JawFracModule(pl.LightningModule):
     ) -> None:
         super().__init__()
 
-        self.model = nn.FracNet(**model_cfg)
+        if two_stage['use']:
+            two_stage = {k: v for k, v in two_stage.items() if k != 'use'}
+            self.model = nn.MandibleFracNet(**two_stage, **model_cfg)
+        else:
+            self.model = nn.FracNet(**model_cfg)
+
         self.criterion = nn.SegmentationLoss(focal_loss, dice_loss)
+
         self.confmat = ConfusionMatrix(num_classes=2)
         self.f1 = F1Score(num_classes=2, average='macro')
         self.precision_metric = FracPrecision()

@@ -13,8 +13,7 @@ class SwinUNETRBackbone(SwinUNETR):
     ) -> Tuple[
         TensorType['B', 'h', 'd', 'h', 'w'],
         TensorType['B', 'C^', 'D', 'H', 'W', torch.float32],
-    ]:     
-        x = x.permute(0, 2, 3, 4, 1)
+    ]:
         hidden_states_out = self.swinViT(x, self.normalize)
         enc0 = self.encoder1(x)
         enc1 = self.encoder2(hidden_states_out[0])

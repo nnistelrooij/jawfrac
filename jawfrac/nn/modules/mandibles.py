@@ -5,6 +5,7 @@ import torch.nn as nn
 from torchtyping import TensorType
 
 from jawfrac.nn.modules.loss import SegmentationLoss
+from jawfrac.nn.modules.swin_unetr import SwinUNETRBackbone
 from jawfrac.nn.modules.unet import UNet
 
 
@@ -15,25 +16,42 @@ class MandibleNet(nn.Module):
         num_awms: int,
         num_classes: int,
         channels_list: List[int],
+        backbone: str,
+        checkpoint_path: str='',
     ) -> None:
         super().__init__()
 
-        self.unet = UNet(
-            in_channels=1,
-            num_classes=num_classes,
-            channels_list=channels_list,
-            num_awms=num_awms,
-        )
+        if backbone == 'conv':
+            self.unet = UNet(
+                in_channels=1,
+                num_classes=num_classes,
+                channels_list=channels_list,
+                num_awms=num_awms,
+            )
+        elif backbone == 'swin':
+            self.unet = SwinUNETRBackbone(
+                img_size=64,
+                in_channels=1,
+                out_channels=1,
+                feature_size=36,
+            )
+        else:
+            raise ValueError(f'Backbone not recognized: {backbone}.')
 
         self.loc_head = nn.Sequential(
-            nn.Linear(128, 64),
+            nn.Linear(128 + 448 * (backbone == 'swin'), 64),
             nn.BatchNorm1d(64, momentum=0.1), 
             nn.ReLU(), 
             nn.Linear(64, 3)
         )
         
         # self.loc_head = nn.Linear(64, 3)
-        self.seg_head = nn.Conv3d(32, num_classes, 3, padding=1)
+        self.seg_head = nn.Conv3d(32 + 4 * (backbone == 'swin'), num_classes, 3, padding=1)
+
+        if checkpoint_path:
+            state_dict = torch.load(checkpoint_path)['state_dict']
+            state_dict = {k[6:]: v for k, v in state_dict.items()}
+            self.load_state_dict(state_dict)
 
     def forward(
         self,
@@ -69,7 +87,7 @@ class MandibleLoss(nn.Module):
         seg: TensorType['B', 'D', 'H', 'W', torch.float32],
         y: Tuple[
             TensorType['B', 3, torch.float32],
-            TensorType['B', 'D', 'H', 'W', torch.int64],
+            TensorType['B', 'D', 'H', 'W', torch.bool],
         ],
     ) -> Tuple[
         TensorType[torch.float32],

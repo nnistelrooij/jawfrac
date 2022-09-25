@@ -44,7 +44,7 @@ def draw_fracture_result(
     target: TensorType['D', 'H', 'W', torch.bool],
     mandible_ratio: int=16,
 ) -> None:
-    # determine TP, FP, and FN voxel indices
+    # determine TP, FP, and FN fracture voxel indices
     pred = pred.nonzero()
     target = target.nonzero()
     voxel_idxs = torch.cat((pred, target))

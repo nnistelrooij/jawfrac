@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Tuple, Union
 from numpy.typing import NDArray
 from torch.utils.data import Dataset
 
-from jawfrac.data.datasets.cache import DatasetCache
+from jawfrac.data.utils.cache import DatasetCache
 
 
 class VolumeDataset(Dataset):

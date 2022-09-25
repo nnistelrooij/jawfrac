@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Union
 
 import nibabel
 import numpy as np
@@ -15,7 +15,7 @@ class JawFracDataset(VolumeDataset):
     def __init__(
         self,
         stage: str,
-        mandible_crop_padding: float,
+        mandible_crop: Dict[str, Union[float, bool]],
         regular_spacing: float,
         patch_size: int,
         stride: int,
@@ -23,11 +23,11 @@ class JawFracDataset(VolumeDataset):
         **kwargs: Dict[str, Any],
     ) -> None:
         pre_transform = T.Compose(
-            T.MandibleCrop(padding=mandible_crop_padding),
+            T.MandibleCrop(**mandible_crop),
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
             T.PatchIndices(patch_size=patch_size, stride=stride),
-            T.BonePatchIndices(),
+            T.MandiblePatchIndices(),
             *((
                 T.PositivePatchIndices(patch_size=patch_size),
                 T.NegativeIndices(),

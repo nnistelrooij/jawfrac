@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
@@ -20,6 +20,7 @@ class UNet(nn.Module):
         num_classes: int,
         channels_list: List[int],
         num_awms: int,
+        checkpoint_path: str='',
     ) -> None:
         super().__init__()
 
@@ -36,6 +37,10 @@ class UNet(nn.Module):
             num_classes,
             [128, 64, 32, 16],
         )
+
+        if checkpoint_path:
+            checkpoint = torch.load(checkpoint_path)
+            self.load_state_dict(checkpoint)
 
     def forward(
         self,
@@ -93,10 +98,10 @@ class Decoder(nn.Module):
         super().__init__()
 
         self.layers = nn.ModuleList()
-        for i in range(-1, len(channels_list) - 2):
+        for i in range(len(channels_list) - 1):
             self.layers.append(nn.Sequential(
-                ConvBlock(channels_list[i], channels_list[i + 1]) if i >= 0 else nn.Identity(),
-                ConvTransposeBlock(channels_list[i + 1], channels_list[i + 2], 3),
+                ConvBlock(2 * channels_list[i], channels_list[i]) if i > 0 else nn.Identity(),
+                ConvTransposeBlock(channels_list[i], channels_list[i + 1], 3),
             ))
 
     def forward(

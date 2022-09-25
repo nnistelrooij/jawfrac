@@ -21,9 +21,10 @@ class SegmentationLoss(nn.Module):
     def forward(
         self,
         pred: TensorType['B', '...', torch.float32],
-        target: TensorType['B', '...', torch.int64],
+        target: TensorType['B', '...', torch.bool],
     ) -> TensorType[torch.float32]:
-        loss = self.bce(pred, target.float())
+        target = target.float()
+        loss = self.bce(pred, target)
 
         if self.focal_loss:
             probs = torch.sigmoid(pred)

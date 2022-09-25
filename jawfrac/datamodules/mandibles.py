@@ -112,7 +112,7 @@ class MandibleSegDataModule(VolumeDataModule):
             )
 
         if stage is None or stage == 'predict':
-            files = self._files('predict')[:20]
+            files = self._files('predict')[120:140]
 
             self.predict_dataset = MandibleSegDataset(
                 stage='predict',
@@ -136,7 +136,7 @@ class MandibleSegDataModule(VolumeDataModule):
         TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
         Tuple[
             TensorType['P', 3, torch.float32],
-            TensorType['P', 'size', 'size', 'size', torch.int64],
+            TensorType['P', 'size', 'size', 'size', torch.bool],
         ],
     ]:
         batch_dict = {key: [d[key] for d in batch] for key in batch[0]}
@@ -153,15 +153,13 @@ class MandibleSegDataModule(VolumeDataModule):
     ) -> Tuple[
         TensorType['C', 'D', 'H', 'W', torch.float32],
         TensorType['P', 3, 2, torch.int64],
-        TensorType['P', 3, torch.float32],
-        TensorType['D', 'H', 'W', torch.int64],
+        TensorType['D', 'H', 'W', torch.bool],
     ]:
         features = batch[0]['features']
         patch_idxs = batch[0]['patch_idxs']
-        patch_coords = batch[0]['patch_coords']
         labels = batch[0]['labels']
         
-        return features, patch_idxs, patch_coords, labels
+        return features, patch_idxs, labels
 
     def predict_collate_fn(
         self,

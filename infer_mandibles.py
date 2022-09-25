@@ -19,15 +19,15 @@ def infer():
     )
 
     model = MandibleSegModule.load_from_checkpoint(
-        'checkpoints/mandibles_positions_no_gapm.ckpt',
+        'checkpoints/mandibles_positions_size=0.4.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )
     torch.save(model.model.unet.state_dict(), 'checkpoints/unet.ckpt')
 
     trainer = pl.Trainer(
-        # accelerator='gpu',
-        # devices=1,
+        accelerator='gpu',
+        devices=1,
         max_epochs=config['model']['epochs'],
     )
     preds = trainer.predict(model, datamodule=dm)
