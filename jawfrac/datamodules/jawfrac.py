@@ -1,8 +1,9 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from skmultilearn.model_selection import IterativeStratification
 import torch
 from torchtyping import TensorType
 
@@ -13,8 +14,19 @@ from jawfrac.datamodules.base import VolumeDataModule
 
 class JawFracDataModule(VolumeDataModule):
 
+    REGIONS = [
+        'Coronoid',
+        'Condyle',
+        'Ramus',
+        'Angulus',
+        'Paramedian',
+        'Median',
+    ]
+
     def __init__(
         self,
+        linear: bool,
+        displacements: bool,
         patch_size: int,
         expand_label: Dict[str, int],
         max_patches_per_scan: int,
@@ -22,10 +34,7 @@ class JawFracDataModule(VolumeDataModule):
         **dm_cfg: Dict[str, Any],
     ) -> None:
         super().__init__(
-            exclude=[
-                '12', '103', '123', '125', '128',
-                '130', '148', '155', '171', '186',
-            ],
+            exclude=[],
             patch_size=patch_size,
             expand_label=expand_label,
             seed=seed,
@@ -36,9 +45,8 @@ class JawFracDataModule(VolumeDataModule):
             T.IntensityAsFeatures(),
             T.ToTensor(),
         )
-
-        self.count = sum(v > 0 for k, v in expand_label.items() if 'iters' in k)
-        self.count = expand_label['smooth'] * self.count + 1
+        self.linear = linear
+        self.displacements = displacements
         self.patch_size = patch_size
         self.max_patches_per_scan = max_patches_per_scan
 
@@ -48,10 +56,15 @@ class JawFracDataModule(VolumeDataModule):
         if self.filter == 'Controls':
             return files
 
-        df = pd.read_csv(self.root / 'Sophie overview.csv')
-        idxs = df.index[pd.isna(df['HU']) & pd.isna(df['Dislocated'])]
+        df = pd.read_csv(self.root / 'Sophie overview 2.0.csv')
+        mask = df['Note'].isna() & (
+            (self.displacements & df['Displaced'])
+            |
+            (self.linear & df['Linear'])
+        )
+        idxs = df.index[mask]
 
-        patients = list(map(lambda p: int(p.parent.stem), files))
+        patients = [int(f.parent.stem) for f in files]
         files = [f for f, p in zip(files, patients) if p - 1 in idxs]
 
         return files
@@ -62,17 +75,72 @@ class JawFracDataModule(VolumeDataModule):
         if not isinstance(self, JawFracDataModule):
             return list(zip(scan_files))
 
-        mandible_files = self._filter_files('**/mandible.nii.gz')
+        mandible_files = self._filter_files('**/mandible2.nii.gz')
 
         if stage == 'predict':
             return list(zip(scan_files, mandible_files))
-        
-        frac_files = self._filter_files('**/Patient*segm*.nii.gz')
-        frac_files += self._filter_files('**/*seg_normal*.nii.gz')
-        frac_files += self._filter_files('**/Seg*.nii.gz')
-        frac_files = sorted(frac_files)
+
+        frac_files = self._filter_files('**/label.nii.gz')
 
         return list(zip(scan_files, mandible_files, frac_files))
+
+    def _split(
+        self,
+        files: List[Tuple[Path, ...]],
+    ) -> Tuple[
+        List[Tuple[Path, ...]],
+        List[Tuple[Path, ...]],
+        List[Tuple[Path, ...]],
+    ]:
+        # take subsample of DataFrame comprised by given files
+        df = pd.read_csv(self.root / 'Sophie overview 2.0.csv')
+        idxs = [int(f[0].parent.stem) - 1 for f in files]
+        df = df.iloc[idxs].reset_index()
+
+        # make one-hot vectors about fracture region and displacement
+        one_hots = np.zeros((df.shape[0], len(self.REGIONS) + 2), dtype=int)
+        for i, row in df.iterrows():
+            regions = row['Locations'].split(', ')
+            for region in regions:
+                one_hots[i][self.REGIONS.index(region)] = 1
+
+            one_hots[i][-2] = row['Displaced']
+            one_hots[i][-1] = row['Linear']
+
+        # make multi-label stratified split for train and validation/test files
+        splitter = IterativeStratification(
+            n_splits=2,
+            order=1,
+            sample_distribution_per_fold=[
+                self.val_size + self.test_size,
+                1 - self.val_size - self.test_size,
+            ],
+        )
+        train_idxs, val_test_idxs = next(splitter.split(one_hots, one_hots))
+
+        train_files = [files[i] for i in train_idxs]
+        val_test_files = [files[i] for i in val_test_idxs]
+        one_hots = one_hots[val_test_idxs]
+
+        # return if there should not be validation or test files
+        if self.val_size == 0.0 and self.test_size == 0.0:
+            return train_files, [], []
+
+        # make multi-label stratified split for validation and test files
+        splitter = IterativeStratification(
+            n_splits=2,
+            order=1,
+            sample_distribution_per_fold=[
+                self.test_size / (self.val_size + self.test_size),
+                self.val_size / (self.val_size + self.test_size),
+            ],
+        )
+        val_idxs, test_idxs = next(splitter.split(one_hots, one_hots))
+
+        val_files = [val_test_files[i] for i in val_idxs]
+        test_files = [val_test_files[i] for i in test_idxs]
+
+        return train_files, val_files, test_files
 
     def setup(self, stage: Optional[str]=None) -> None:
         if stage is None or stage == 'fit':
@@ -83,7 +151,9 @@ class JawFracDataModule(VolumeDataModule):
             val_transforms = T.Compose(
                 T.IntensityAsFeatures(),
                 T.PositiveNegativePatches(
-                    max_patches=self.max_patches_per_scan, rng=rng,
+                    max_patches=self.max_patches_per_scan,
+                    pos_labels=[1]*self.linear + [2]*self.displacements,
+                    rng=rng,
                 ),
                 T.ToTensor(),
             )
@@ -108,7 +178,7 @@ class JawFracDataModule(VolumeDataModule):
                 **self.dataset_cfg,
             )
 
-            self.trainer.logger.log_hyperparams({
+            if self.trainer is not None: self.trainer.logger.log_hyperparams({
                 'pre_transform': str(self.train_dataset.pre_transform),
                 'train_transform': str(self.train_dataset.transform),
                 'val_transform': str(self.val_dataset.transform),
@@ -149,14 +219,24 @@ class JawFracDataModule(VolumeDataModule):
         batch: List[Dict[str, TensorType[..., Any]]],
     ) -> Tuple[
         TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
-        TensorType['P', 'size', 'size', 'size', torch.float32],
+        Union[
+            TensorType['P', 'size', 'size', 'size', torch.bool],
+            Tuple[
+                TensorType['P', 'size', 'size', 'size', torch.bool],
+                TensorType['P', torch.bool],
+            ],
+        ],
     ]:
         batch_dict = {key: [d[key] for d in batch] for key in batch[0]}
 
         features = torch.cat(batch_dict['features'])
-        labels = torch.cat(batch_dict['labels']) / self.count
+        masks = torch.cat(batch_dict['masks'])
+        classes = torch.cat(batch_dict['classes'])
 
-        return features, labels
+        if self.displacements:
+            return features, (masks, classes == 2)
+        else:
+            return features, masks
 
     def test_collate_fn(
         self,

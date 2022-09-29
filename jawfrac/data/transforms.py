@@ -39,245 +39,6 @@ class Compose:
         ])
 
 
-class ToTensor:
-
-    def __init__(
-        self,
-        bool_dtypes: List[np.dtype]=[bool, np.bool8],
-        int_dtypes: List[np.dtype]=[int, np.int16, np.uint16, np.int32, np.int64],
-        float_dtypes: List[np.dtype]=[float, np.float32, np.float64],
-    ) -> None:
-        self.bool_dtypes = bool_dtypes
-        self.int_dtypes = int_dtypes
-        self.float_dtypes = float_dtypes
-
-    def __call__(
-        self,
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, TensorType[..., Any]]:
-        for k, v in data_dict.items():
-            dtype = v.dtype if isinstance(v, np.ndarray) else type(v)
-            if dtype in self.bool_dtypes:
-                data_dict[k] = torch.tensor(copy.copy(v), dtype=torch.bool)
-            elif dtype in self.int_dtypes:
-                data_dict[k] = torch.tensor(copy.copy(v), dtype=torch.int64)            
-            elif dtype in self.float_dtypes:
-                data_dict[k] = torch.tensor(copy.copy(v), dtype=torch.float32)
-            else:
-                raise ValueError(
-                    'Expected a scalar or list or NumPy array with elements of '
-                    f'{self.bool_dtypes + self.int_dtypes + self.float_dtypes},'
-                    f' but got {dtype}.'
-                )
-            
-        return data_dict
-
-    def __repr__(self) -> str:
-        return self.__class__.__name__ + '()'
-
-
-class MandibleCrop:
-
-    def __init__(
-        self,
-        padding: Union[float, ArrayLike],
-        manifold: bool,
-    ) -> None:
-        self.padding = padding
-        self.manifold = manifold
-
-    def __call__(
-        self,
-        intensities: NDArray[Any],
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        # set all intensities outside mandible to -1000
-        mandible = ndimage.binary_dilation(
-            input=data_dict['mandible'],
-            structure=ndimage.generate_binary_structure(3, 2),
-            iterations=10,
-        )
-        if self.manifold:
-            intensities[~mandible] = -1024
-
-        # find smallest bounding box that encapsulates mandible
-        slices = ndimage.find_objects(mandible)[0]
-
-        # determine slices of bounding box after padding
-        padded_slices = ()
-        padding = np.ceil(self.padding / data_dict['spacing']).astype(int)
-        for s, pad in zip(slices, padding):
-            padded_slice = slice(max(s.start - pad, 0), s.stop + pad)
-            padded_slices += (padded_slice,)
-
-        # crop volumes given padded slices
-        data_dict['intensities'] = intensities[padded_slices]
-        data_dict['mandible'] = data_dict['mandible'][padded_slices]
-        if 'labels' in data_dict:
-            data_dict['labels'] = data_dict['labels'][padded_slices]
-
-        # determine affine transformation from source to crop
-        affine = np.eye(4)
-        affine[:3, 3] -= [s.start for s in padded_slices]
-        data_dict['affine'] = affine @ data_dict.get('affine', np.eye(4))
-
-        return data_dict
-
-    def __repr__(self) -> str:
-        return '\n'.join([
-            self.__class__.__name__ + '(',
-            f'    padding={self.padding},',
-            f'    manifold={self.manifold},',
-            ')',
-        ])
-
-
-class ExpandLabel:
-
-    def __init__(
-        self,
-        bone_iters: int,
-        all_iters: int,
-        smooth: bool,
-        bone_intensity_threshold: int=300,
-    ) -> None:
-        self.bone_iters = bone_iters
-        self.bone_intensity_thresh = bone_intensity_threshold
-        self.all_iters = all_iters
-        self.smooth = smooth
-
-    def __call__(
-        self,
-        intensities: NDArray[Any],
-        labels: NDArray[Any],
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        labels = labels > 0
-        out = labels.astype(np.int16)
-
-        if self.bone_iters:
-            labels = ndimage.binary_dilation(
-                input=labels,
-                structure=ndimage.generate_binary_structure(3, 2),
-                iterations=self.bone_iters,
-                mask=intensities >= self.bone_intensity_thresh,
-            )
-            out = self.smooth * out + labels.astype(np.int16)
-
-        if self.all_iters:
-            labels = ndimage.binary_dilation(
-                input=labels,
-                structure=ndimage.generate_binary_structure(3, 2),
-                iterations=self.all_iters,
-            )
-            out = self.smooth * out + labels.astype(np.int16)
-
-        data_dict['intensities'] = intensities
-        data_dict['labels'] = out
-
-        return data_dict
-
-    def __repr__(self) -> str:
-        return '\n'.join([
-            self.__class__.__name__ + '(',
-            f'    bone_iters={self.bone_iters},',
-            f'    bone_intensity_threshold={self.bone_intensity_thresh},',
-            f'    all_iters={self.all_iters},',
-            f'    smooth={self.smooth},',
-            ')',
-        ])
-
-
-class NegativeIndices:
-
-    def __call__(
-        self,
-        labels: NDArray[Any],
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        neg_idxs = []
-        for i, patch_idxs in enumerate(data_dict['patch_idxs']):
-            # extract a patch from the volume
-            slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-            patch = labels[slices]
-            
-            # save patch without foreground voxels
-            if not np.any(patch):
-                neg_idxs.append(i)            
-
-        data_dict['labels'] = labels
-        data_dict['neg_idxs'] = np.array(neg_idxs)
-
-        return data_dict
-
-    def __repr__(self) -> str:
-        return self.__class__.__name__ + '()'
-
-
-class PositivePatchIndices:
-
-    def __init__(
-        self,
-        patch_size: int,
-    ) -> None:
-        self.half_length = patch_size // 2
-
-    def __call__(
-        self,
-        labels: NDArray[Any],
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        # cluster annotations using DBSCAN
-        voxel_idxs = np.column_stack(labels.nonzero())
-        dbscan = DBSCAN(eps=10.0, min_samples=80)
-        dbscan.fit(voxel_idxs)
-
-        # seperate each annotation with a different label
-        cluster_idxs = dbscan.labels_
-        labels[tuple(voxel_idxs.T)] = cluster_idxs + 1
-
-        pos_patch_idxs = []
-        for i in range(1, labels.max() + 1):
-            # compute centroid of annotated object
-            voxel_idxs = np.column_stack((labels == i).nonzero())
-            centroid = voxel_idxs.mean(axis=0).round().astype(int)
-
-            # determine start and stop indices of patch around centroid
-            start = centroid - self.half_length
-            stop = centroid + self.half_length
-            patch_idxs = np.column_stack((start, stop))
-
-            pos_patch_idxs.append(patch_idxs)
-
-        # ensure resulting patches are contained in volume
-        pos_patch_idxs = np.stack(pos_patch_idxs)
-        start_idxs, stop_idxs = pos_patch_idxs.transpose(2, 0, 1)
-        diff = (
-            np.maximum(start_idxs, 0) - start_idxs
-            +
-            np.minimum(labels.shape, stop_idxs) - stop_idxs
-        )
-        pos_patch_idxs += diff[..., np.newaxis]
-
-        data_dict['labels'] = labels
-        data_dict['pos_idxs'] = np.arange(pos_patch_idxs.shape[0])
-        if 'patch_idxs' in data_dict:
-            data_dict['patch_idxs'] = np.concatenate(
-                (pos_patch_idxs, data_dict['patch_idxs']),
-            )
-        else:
-            data_dict['patch_idxs'] = pos_patch_idxs
-
-        return data_dict
-
-    def __repr__(self) -> str:
-        return '\n'.join([
-            self.__class__.__name__ + '(',
-            f'    patch_size={self.half_length * 2},',
-            ')',
-        ])
-
-
 class NonNegativeCrop:
 
     def __call__(
@@ -303,7 +64,51 @@ class NonNegativeCrop:
     def __repr__(self) -> str:
         return self.__class__.__name__ + '()'
 
-    
+
+class MandibleCrop:
+
+    def __init__(
+        self,
+        padding: Union[float, ArrayLike],
+    ) -> None:
+        self.padding = padding
+
+    def __call__(
+        self,
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        # find smallest bounding box that encapsulates mandible
+        slices = ndimage.find_objects(data_dict['mandible'])[0]
+
+        # determine slices of bounding box after padding
+        padded_slices = ()
+        padding = np.ceil(self.padding / data_dict['spacing']).astype(int)
+        for s, pad in zip(slices, padding):
+            padded_slice = slice(max(s.start - pad, 0), s.stop + pad)
+            padded_slices += (padded_slice,)
+
+        # crop volumes given padded slices
+        for key in ['intensities', 'mandible', 'labels']:
+            if key not in data_dict:
+                continue
+
+            data_dict[key] = data_dict[key][padded_slices]
+
+        # determine affine transformation from source to crop
+        affine = np.eye(4)
+        affine[:3, 3] -= [s.start for s in padded_slices]
+        data_dict['affine'] = affine @ data_dict.get('affine', np.eye(4))
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    padding={self.padding},',
+            ')',
+        ])
+
+
 class RegularSpacing:
 
     def __init__(
@@ -317,21 +122,33 @@ class RegularSpacing:
 
     def __call__(
         self,
+        intensities: NDArray[Any],
         spacing: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         # compute how much bigger results should be
         zoom = spacing / self.spacing
 
-        # interpolate the inputs to have regular voxel spacing
-        for key in ['intensities', 'mandible', 'labels']:
-            if key not in data_dict:
-                continue
+        # interpolate intensities volume to given voxel spacing
+        intensities = ndimage.zoom(input=intensities, zoom=zoom)
+        data_dict['intensities'] = intensities
+        
+        # interpolate mandible segmentation to given voxel spacing
+        if 'mandible' in data_dict:
+            data_dict['mandible'] = ndimage.zoom(
+                input=data_dict['mandible'], zoom=zoom, output=float,
+            ).round().astype(bool)
+
+        # interpolate labels volume to given voxel spacing
+        if 'labels' in data_dict:
+            labels = np.zeros_like(intensities, dtype=data_dict['labels'].dtype)
+            for label in np.unique(data_dict['labels'])[1:]:
+                label_mask = ndimage.zoom(
+                    input=data_dict['labels'] == label, zoom=zoom, output=float,
+                ).round().astype(bool)
+                labels[label_mask] = label
             
-            volume = data_dict[key]
-            volume = ndimage.zoom(input=volume, zoom=zoom, output=float)
-            volume = volume.clip(data_dict[key].min(), data_dict[key].max())
-            data_dict[key] = volume.round().astype(data_dict[key].dtype)
+            data_dict['labels'] = labels
 
         # update voxel spacing accordingly
         data_dict['spacing'] = self.spacing
@@ -416,6 +233,7 @@ class PatchIndices:
 
         data_dict['intensities'] = intensities
         data_dict['patch_idxs'] = patch_idxs
+        data_dict['patch_labels'] = np.full((patch_idxs.shape[0],), -1)
 
         return data_dict
 
@@ -443,17 +261,17 @@ class BonePatchIndices:
         intensities: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        bone_patch_idxs = []
-        for patch_idxs in data_dict['patch_idxs']:
+        patches_mask = np.zeros(data_dict['patch_idxs'].shape[0], dtype=bool)
+        for i, patch_idxs in enumerate(data_dict['patch_idxs']):
             slices = tuple(slice(start, stop) for start, stop in patch_idxs)
             patch = intensities[slices]
 
             bone_mask = patch >= self.intensity_thresh
-            if bone_mask.mean() >= self.volume_thresh:
-                bone_patch_idxs.append(patch_idxs)
+            patches_mask[i] = bone_mask.mean() >= self.volume_thresh
 
         data_dict['intensities'] = intensities
-        data_dict['patch_idxs'] = np.stack(bone_patch_idxs)
+        data_dict['patch_idxs'] = data_dict['patch_idxs'][patches_mask]
+        data_dict['patch_labels'] = data_dict['patch_labels'][patches_mask]
 
         return data_dict
 
@@ -487,17 +305,17 @@ class MandiblePatchIndices:
             iterations=10,
         )
 
-        mandible_patch_idxs = []
-        for patch_idxs in data_dict['patch_idxs']:
+        patches_mask = np.zeros(data_dict['patch_idxs'].shape[0], dtype=bool)
+        for i, patch_idxs in enumerate(data_dict['patch_idxs']):
             slices = tuple(slice(start, stop) for start, stop in patch_idxs)
             patch = intensities[slices]
 
             mandible_mask = mandible[slices] & (patch >= self.intensity_thresh)
-            if mandible_mask.mean() >= self.volume_thresh:
-                mandible_patch_idxs.append(patch_idxs)
+            patches_mask[i] = mandible_mask.mean() >= self.volume_thresh
 
         data_dict['intensities'] = intensities
-        data_dict['patch_idxs'] = np.stack(mandible_patch_idxs)
+        data_dict['patch_idxs'] = data_dict['patch_idxs'][patches_mask]
+        data_dict['patch_labels'] = data_dict['patch_labels'][patches_mask]
 
         return data_dict
 
@@ -508,34 +326,6 @@ class MandiblePatchIndices:
             f'    volume_threshold={self.volume_thresh},',
             ')',
         ])
-
-
-class RelativePatchCoordinates:
-
-    def __call__(
-        self,
-        labels: NDArray[Any],
-        patch_idxs: NDArray[Any],
-        **data_dict: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        # compute statistics of annotated object
-        voxels = np.column_stack(labels.nonzero())
-        centroid = voxels.mean(axis=0)
-        scale = voxels.std(axis=0).max()
-
-        # determine normalized relative coordinates of each patch
-        centers = patch_idxs.mean(axis=2)
-        patch_coords = (centers - centroid) / scale
-        patch_coords[:, 0] = np.abs(patch_coords[:, 0])  # left-right symmetry
-
-        data_dict['labels'] = labels
-        data_dict['patch_idxs'] = patch_idxs
-        data_dict['patch_coords'] = patch_coords
-
-        return data_dict
-    
-    def __repr__(self) -> str:
-        return self.__class__.__name__ + '()'
 
 
 class PositiveNegativeIndices:
@@ -551,21 +341,18 @@ class PositiveNegativeIndices:
         labels: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        pos_idxs, neg_idxs = [], []
-        for i, patch_idxs in enumerate(data_dict['patch_idxs']):
+        patch_labels = []
+        for patch_idxs in data_dict['patch_idxs']:
             # extract a patch from the volume
             slices = tuple(slice(start, stop) for start, stop in patch_idxs)
             patch = labels[slices]
             
             # determine if patch contains sufficient foreground voxels
-            if patch.mean() >= self.volume_thresh:
-                pos_idxs.append(i)
-            else:
-                neg_idxs.append(i)
+            label = 1 if patch.mean() >= self.volume_thresh else 0
+            patch_labels.append(label)
 
         data_dict['labels'] = labels
-        data_dict['pos_idxs'] = np.array(pos_idxs)
-        data_dict['neg_idxs'] = np.array(neg_idxs)
+        data_dict['patch_labels'] = np.array(patch_labels)
 
         return data_dict
 
@@ -577,28 +364,256 @@ class PositiveNegativeIndices:
         ])
 
 
-class IntensityAsFeatures:
+class LinearFracturePatchIndices:
+
+    def __init__(
+        self,
+        patch_size: int,
+        fg_label: int=1,
+    ) -> None:
+        self.half_length = patch_size // 2
+        self.fg_label = fg_label
+
+    def bounding_boxes(
+        self,
+        cluster_idxs: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        # determine voxel indices of centroid
+        centroids = np.zeros((cluster_idxs.max(), 3), dtype=int)
+        for i in range(cluster_idxs.max()):
+            # compute centroid of annotated object
+            voxel_idxs = np.column_stack((cluster_idxs == i + 1).nonzero())
+            centroids[i] = voxel_idxs.mean(axis=0).round().astype(int)
+
+        # determine start and stop indices of patch around centroid
+        start_idxs = centroids - self.half_length
+        stop_idxs = centroids + self.half_length
+        patch_idxs = np.dstack((start_idxs, stop_idxs))
+
+        # ensure resulting patches are contained in volume
+        diff = (
+            np.maximum(start_idxs, 0) - start_idxs
+            +
+            np.minimum(data_dict['labels'].shape, stop_idxs) - stop_idxs
+        )
+        patch_idxs += diff[..., np.newaxis]
+
+        # update or set new patch indices and labels
+        patch_labels = np.full(patch_idxs.shape[0], self.fg_label)
+        if 'patch_idxs' in data_dict:
+            data_dict['patch_idxs'] = np.concatenate(
+                (data_dict['patch_idxs'], patch_idxs),
+            )
+            data_dict['patch_labels'] = np.concatenate(
+                (data_dict['patch_labels'], patch_labels),
+            )
+        else:
+            data_dict['patch_idxs'] = patch_idxs
+            data_dict['patch_labels'] = patch_labels
+
+        return data_dict
+
+    def __call__(
+        self,
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not np.any(data_dict['labels'] == self.fg_label):
+            return data_dict
+
+        # cluster annotations using DBSCAN
+        labels = (data_dict['labels'] == self.fg_label).astype(int)
+        voxel_idxs = np.column_stack(labels.nonzero())
+        dbscan = DBSCAN(eps=10.0, min_samples=80)
+        dbscan.fit(voxel_idxs)
+
+        # seperate each annotation with a different label
+        cluster_idxs = dbscan.labels_
+        labels[tuple(voxel_idxs.T)] = cluster_idxs + 1
+
+        return self.bounding_boxes(labels, **data_dict)
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    patch_size={self.half_length * 2},',
+            ')',
+        ])
+
+
+class DisplacedFracturePatchIndices(LinearFracturePatchIndices):
+
+    def __init__(
+        self,
+        patch_size: int,
+        fg_label: int=2,
+        voxel_threshold: int=1000,
+    ) -> None:
+        super().__init__(patch_size, fg_label)
+
+        self.voxel_thresh = voxel_threshold
+
+    def __call__(
+        self,
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not np.any(data_dict['labels'] == self.fg_label):
+            return data_dict
+
+        # determine connected components
+        labels = data_dict['labels'] == self.fg_label
+        labels, _ = ndimage.label(
+            input=labels,
+            structure=ndimage.generate_binary_structure(3, 1),
+        )
+        _, counts = np.unique(labels, return_counts=True)
+
+        # remove connected components smaller than self.voxel_thresh
+        labels[(counts < self.voxel_thresh)[labels]] = 0
+        _, labels = np.unique(labels, return_inverse=True)
+        labels = labels.reshape(data_dict['labels'].shape)
+        
+        return self.bounding_boxes(labels, **data_dict)
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    patch_size={self.half_length * 2},',
+            f'    voxel_threshold={self.voxel_thresh},',
+            ')',
+        ])
+
+
+class ExpandLabel:
+
+    def __init__(
+        self,
+        bone_iters: int,
+        all_iters: int,
+        negative_iters: int,
+        bone_intensity_threshold: int=300,
+    ) -> None:
+        self.bone_iters = bone_iters
+        self.bone_intensity_thresh = bone_intensity_threshold
+        self.all_iters = all_iters
+        self.negative_iters = negative_iters
 
     def __call__(
         self,
         intensities: NDArray[Any],
+        labels: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        data_dict['intensities'] = intensities
+        unique_labels = np.unique(labels)
 
-        intensities = intensities.clip(-1024, 3071).astype(float)
+        if self.bone_iters:
+            for label in unique_labels[1:]:
+                dilation = ndimage.binary_dilation(
+                    input=labels == label,
+                    structure=ndimage.generate_binary_structure(3, 2),
+                    iterations=self.bone_iters,
+                    mask=intensities >= self.bone_intensity_thresh,
+                )
+                labels[dilation] = label
 
-        if 'features' in data_dict:
-            data_dict['features'] = np.concatenate(
-                (data_dict['features'], intensities[np.newaxis]),
+        if self.all_iters:
+            for label in unique_labels[1:]:
+                dilation = ndimage.binary_dilation(
+                    input=labels == label,
+                    structure=ndimage.generate_binary_structure(3, 2),
+                    iterations=self.all_iters,
+                )
+                labels[dilation] = label
+
+        if self.negative_iters:
+            dilation = ndimage.binary_dilation(
+                input=labels,
+                structure=ndimage.generate_binary_structure(3, 2),
+                iterations=self.negative_iters,
             )
-        else:
-            data_dict['features'] = intensities[np.newaxis]
+            labels[(labels == 0) & dilation] = -1
+
+        data_dict['intensities'] = intensities
+        data_dict['labels'] = labels
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    bone_iters={self.bone_iters},',
+            f'    bone_intensity_threshold={self.bone_intensity_thresh},',
+            f'    all_iters={self.all_iters},',
+            ')',
+        ])
+
+
+class NegativeIndices:
+
+    def __call__(
+        self,
+        labels: NDArray[Any],
+        patch_labels: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        for i, patch_idxs in enumerate(data_dict['patch_idxs']):
+            if patch_labels[i] != -1:
+                continue
+
+            # extract a patch from the volume
+            slices = tuple(slice(start, stop) for start, stop in patch_idxs)
+            patch = labels[slices]
+            
+            # save patch without foreground voxels
+            patch_labels[i] = -1 * np.any(patch)
+
+        data_dict['labels'] = labels
+        data_dict['patch_labels'] = patch_labels
 
         return data_dict
 
     def __repr__(self) -> str:
         return self.__class__.__name__ + '()'
+
+
+class RandomXAxisFlip:
+
+    def __init__(
+        self,
+        p: float=0.5,
+        rng: Optional[np.random.Generator]=None,
+    ) -> None:
+        self.p = p
+        self.rng = rng if rng is not None else np.random.default_rng()
+
+    def __call__(
+        self,
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if self.rng.random() >= self.p:
+            return data_dict
+
+        # flip x-axis of volumes
+        for key in ['intensities', 'mandible', 'labels']:
+            if key not in data_dict:
+                continue
+            
+            shape = data_dict[key].shape
+            data_dict[key] = data_dict[key][::-1]
+
+        # move patches to other side of volume
+        patch_idxs = data_dict['patch_idxs'].copy()
+        patch_idxs[:, 0] = np.fliplr(shape[0] - patch_idxs[:, 0])
+        data_dict['patch_idxs'] = patch_idxs
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    p={self.p},',
+            ')',
+        ])
 
 
 class RandomPatchTranslate:
@@ -647,35 +662,56 @@ class RandomPatchTranslate:
         ])
 
 
-class RandomXAxisFlip:
+class RelativePatchCoordinates:
 
-    def __init__(
+    def __call__(
         self,
-        p: float=0.5,
-        rng: Optional[np.random.Generator]=None,
-    ) -> None:
-        self.p = p
-        self.rng = rng if rng is not None else np.random.default_rng()
+        labels: NDArray[Any],
+        patch_idxs: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        # compute statistics of annotated object
+        voxels = np.column_stack(labels.nonzero())
+        centroid = voxels.mean(axis=0)
+        scale = voxels.std(axis=0).max()
+
+        # determine normalized relative coordinates of each patch
+        centers = patch_idxs.mean(axis=2)
+        patch_coords = (centers - centroid) / scale
+        patch_coords[:, 0] = np.abs(patch_coords[:, 0])  # left-right symmetry
+
+        data_dict['labels'] = labels
+        data_dict['patch_idxs'] = patch_idxs
+        data_dict['patch_coords'] = patch_coords
+
+        return data_dict
+    
+    def __repr__(self) -> str:
+        return self.__class__.__name__ + '()'
+
+
+class IntensityAsFeatures:
 
     def __call__(
         self,
         intensities: NDArray[Any],
-        labels: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        # flip x-axis of volumes
-        flip = 1 - 2 * (self.rng.random() < self.p)
-        data_dict['intensities'] = intensities[::flip]
-        data_dict['labels'] = labels[::flip]
+        data_dict['intensities'] = intensities
+
+        intensities = intensities.clip(-1024, 3071).astype(float)
+
+        if 'features' in data_dict:
+            data_dict['features'] = np.concatenate(
+                (data_dict['features'], intensities[np.newaxis]),
+            )
+        else:
+            data_dict['features'] = intensities[np.newaxis]
 
         return data_dict
 
     def __repr__(self) -> str:
-        return '\n'.join([
-            self.__class__.__name__ + '(',
-            f'    p={self.p},',
-            ')',
-        ])
+        return self.__class__.__name__ + '()'
 
 
 class PositiveNegativePatches:
@@ -683,9 +719,11 @@ class PositiveNegativePatches:
     def __init__(
         self,
         max_patches: int,
+        pos_labels: List[int]=[1],
         rng: Optional[np.random.Generator]=None,
     ) -> None:
         self.max_pos_patches = max_patches // 2
+        self.pos_labels = np.array([pos_labels]).T
         self.rng = rng if rng is not None else np.random.default_rng()
 
     def __call__(
@@ -693,37 +731,36 @@ class PositiveNegativePatches:
         features: NDArray[np.float64],
         labels: NDArray[Any],
         patch_idxs: NDArray[Any],
-        pos_idxs: NDArray[np.int64],
-        neg_idxs: NDArray[np.int64],
+        patch_labels: NDArray[np.int64],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         # sample at most self.max_pos_patches positive patches from scan
+        pos_mask = np.any(patch_labels == self.pos_labels, axis=0)
+        pos_idxs = pos_mask.nonzero()[0]
         pos_idxs = self.rng.permutation(pos_idxs)
         pos_idxs = pos_idxs[:self.max_pos_patches]
 
         # sample as many negative patches as positive patches
+        neg_idxs = (patch_labels == 0).nonzero()[0]
         neg_idxs = self.rng.permutation(neg_idxs)
         neg_idxs = neg_idxs[:pos_idxs.shape[0]]
 
         # select the subsample of patch indices
         pos_neg_idxs = np.concatenate((pos_idxs, neg_idxs))
-        patch_idxs = patch_idxs[pos_neg_idxs]
 
         # crop patches from volumes
-        feature_patches, label_patches = [], []
-        for patch_idxs in patch_idxs:
+        patch_features, patch_masks = [], []
+        for patch_idxs in patch_idxs[pos_neg_idxs]:
             slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-            label_patch = labels[slices]
-            label_patches.append(label_patch)
+            patch_masks.append(labels[slices] == 1)
 
             slices = (slice(None),) + slices
-            feature_patch = features[slices]
-            feature_patches.append(feature_patch)
+            patch_features.append(features[slices])
 
         # stack patches to make batch
-        data_dict['features'] = np.stack(feature_patches)
-        data_dict['labels'] = np.stack(label_patches)
-        data_dict['patch_idxs'] = patch_idxs
+        data_dict['features'] = np.stack(patch_features)
+        data_dict['masks'] = np.stack(patch_masks)
+        data_dict['classes'] = patch_labels[pos_neg_idxs]
         if 'patch_coords' in data_dict:
             data_dict['coords'] = data_dict['patch_coords'][pos_neg_idxs]
 
@@ -733,5 +770,43 @@ class PositiveNegativePatches:
         return '\n'.join([
             self.__class__.__name__ + '(',
             f'    max_patches={2 * self.max_pos_patches},',
+            f'    pos_labels={self.pos_labels.flatten().tolist()},',
             ')',
         ])
+
+
+class ToTensor:
+
+    def __init__(
+        self,
+        bool_dtypes: List[np.dtype]=[bool, np.bool8],
+        int_dtypes: List[np.dtype]=[int, np.int16, np.uint16, np.int32, np.int64],
+        float_dtypes: List[np.dtype]=[float, np.float32, np.float64],
+    ) -> None:
+        self.bool_dtypes = bool_dtypes
+        self.int_dtypes = int_dtypes
+        self.float_dtypes = float_dtypes
+
+    def __call__(
+        self,
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, TensorType[..., Any]]:
+        for k, v in data_dict.items():
+            dtype = v.dtype if isinstance(v, np.ndarray) else type(v)
+            if dtype in self.bool_dtypes:
+                data_dict[k] = torch.tensor(copy.copy(v), dtype=torch.bool)
+            elif dtype in self.int_dtypes:
+                data_dict[k] = torch.tensor(copy.copy(v), dtype=torch.int64)            
+            elif dtype in self.float_dtypes:
+                data_dict[k] = torch.tensor(copy.copy(v), dtype=torch.float32)
+            else:
+                raise ValueError(
+                    'Expected a scalar or NumPy array with elements of '
+                    f'{self.bool_dtypes + self.int_dtypes + self.float_dtypes},'
+                    f' but got {dtype}.'
+                )
+            
+        return data_dict
+
+    def __repr__(self) -> str:
+        return self.__class__.__name__ + '()'

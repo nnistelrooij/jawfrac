@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict
 
 import nibabel
 import numpy as np
@@ -15,7 +15,7 @@ class JawFracDataset(VolumeDataset):
     def __init__(
         self,
         stage: str,
-        mandible_crop: Dict[str, Union[float, bool]],
+        mandible_crop_padding: float,
         regular_spacing: float,
         patch_size: int,
         stride: int,
@@ -23,16 +23,17 @@ class JawFracDataset(VolumeDataset):
         **kwargs: Dict[str, Any],
     ) -> None:
         pre_transform = T.Compose(
-            T.MandibleCrop(**mandible_crop),
+            T.MandibleCrop(padding=mandible_crop_padding),
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
             T.PatchIndices(patch_size=patch_size, stride=stride),
-            T.MandiblePatchIndices(),
+            T.BonePatchIndices(),
             *((
-                T.PositivePatchIndices(patch_size=patch_size),
+                T.LinearFracturePatchIndices(patch_size=patch_size),
+                T.DisplacedFracturePatchIndices(patch_size=patch_size),
+                T.ExpandLabel(**expand_label),
                 T.NegativeIndices(),
             ) if stage == 'fit' else ()),
-            T.ExpandLabel(**expand_label) if stage != 'predict' else dict,
         )
 
         super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)
@@ -64,9 +65,9 @@ class JawFracDataset(VolumeDataset):
 
     def load_target(
         self,
-        file: Path,
+        frac_file: Path,
     ) -> Dict[str, NDArray[np.int16]]:
-        seg = nibabel.load(self.root / file)
+        seg = nibabel.load(self.root / frac_file)
         labels = np.asarray(seg.dataobj)
 
         return {

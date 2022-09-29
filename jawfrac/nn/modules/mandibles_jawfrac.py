@@ -6,6 +6,7 @@ from torchtyping import TensorType
 
 from jawfrac.nn.modules.convnet import ConvTransposeBlock
 from jawfrac.nn.modules.mandibles import MandibleNet
+from jawfrac.nn.modules.swin_unetr import SwinUNETRBackbone
 from jawfrac.nn.modules.unet import Decoder, Encoder
 
 
@@ -13,7 +14,6 @@ class MandibleFracNet(nn.Module):
 
     def __init__(
         self,
-        in_channels: int,
         num_awms: int,
         num_classes: int,
         channels_list: List[int],
@@ -23,35 +23,47 @@ class MandibleFracNet(nn.Module):
     ) -> None:
         super().__init__()
 
+        assert coords != 'sparse' or backbone == 'conv', (
+            'Cannot combine swin backbone with sparse coordinates.'
+        )
+
         self.mandible_net = MandibleNet(
             num_awms=num_awms,
             num_classes=num_classes,
             channels_list=channels_list,
             checkpoint_path=checkpoint_path,
-            backbone=backbone,
+            backbone='conv',
         )
         self.mandible_net.requires_grad_(False)
 
-        self.encoder = Encoder(
-            in_channels=2 + 3 * (coords == 'dense'),
-            channels_list=channels_list,
-        )
+        if backbone == 'conv':
+            self.encoder = Encoder(
+                in_channels=2 + 3 * (coords == 'dense'),
+                channels_list=channels_list,
+            )
+            self.decoder = Decoder(
+                num_classes=1,
+                channels_list=[128 + 3 * (coords == 'sparse'), 64, 32, 16],
+            )
+        elif backbone == 'swin':
+            self.unet = SwinUNETRBackbone(
+                img_size=64,
+                in_channels=2 + 3 * (coords == 'dense'),
+                out_channels=1,
+            )
+        else:
+            raise ValueError(f'Backbone not recognized: {backbone}.')
 
         if coords == 'sparse':
             self.init_sparse_coords()
 
-        self.decoder = Decoder(
-            num_classes=1,
-            channels_list=[128 + 3 * (coords == 'sparse'), 64, 32, 16],
-        )
-
         self.head = nn.Conv3d(
-            in_channels=channels_list[1],
+            in_channels=32 - 8 * (backbone == 'swin'),
             out_channels=1,
-            kernel_size=3,
-            padding=1,
+            kernel_size=1,
         )
 
+        self.backbone = backbone
         self.coords = coords
 
     def init_sparse_coords(self):
@@ -90,7 +102,8 @@ class MandibleFracNet(nn.Module):
             voxel_coords = voxel_coords.permute(0, 4, 1, 2, 3)
             x = torch.cat((x, voxel_coords), dim=1)
 
-        xs = self.encoder(x)
+        if self.backbone == 'conv':
+            xs = self.encoder(x)
 
         if coords == 'sparse':
             coords = self.coords_linear(coords)
@@ -98,7 +111,11 @@ class MandibleFracNet(nn.Module):
             coords = self.coords_conv(coords)
             xs[0] = torch.cat((xs[0], coords), dim=1)
 
-        x = self.decoder(xs)
+        if self.backbone == 'conv':
+            x = self.decoder(xs)
+        elif self.backbone == 'swin':
+            _, x = self.unet(x)
+
         x = self.head(x)
 
         return x.squeeze(dim=1)

@@ -4,7 +4,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import yaml
 
 from jawfrac.datamodules import JawFracDataModule
-from jawfrac.models import JawFracModule
+from jawfrac.models import JawFracModule, JawFracCascadeModule
 
 
 def train():
@@ -18,7 +18,6 @@ def train():
     )
 
     model = JawFracModule(
-        in_channels=dm.num_channels,
         num_classes=dm.num_classes,
         **config['model'],
     )

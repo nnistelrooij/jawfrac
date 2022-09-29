@@ -1,5 +1,5 @@
 work_dir: '/home/mka3dlab/Documents/logs/fractures'
-version: two_stage_only_mandible_patches
+version: only_linear
 seed: 0
 
 model:
@@ -20,23 +20,23 @@ model:
   min_component_size: 2048
 
 datamodule:
-  # root: '/home/mka3dlab/Documents/fractures'
-  root: '/mnt/diag/nielsvannistelrooij/fractures'
+  root: '/home/mka3dlab/Documents/fractures'
+  # root: '/mnt/diag/nielsvannistelrooij/fractures'
   regex_filter: 'Annotation UK'
+  linear: True
+  displacements: False
   val_size: 0.2
-  test_size: 0.0
+  test_size: 0.2
   batch_size: 4
   num_workers: 1
   pin_memory: True
   persistent_workers: True
-  mandible_crop:
-    padding: 5.0  # mm
-    manifold: False
+  mandible_crop_padding: 10.0  # mm
   regular_spacing: 0.4  # mm
   patch_size: 64
   stride: 48
   expand_label:
     bone_iters: 1
     all_iters: 1
-    smooth: True
+    negative_iters: 16
   max_patches_per_scan: 4

@@ -112,7 +112,7 @@ class MandibleSegDataModule(VolumeDataModule):
             )
 
         if stage is None or stage == 'predict':
-            files = self._files('predict')[120:140]
+            files = self._files('predict')[:2]
 
             self.predict_dataset = MandibleSegDataset(
                 stage='predict',
