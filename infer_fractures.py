@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import yaml
 
 from jawfrac.datamodules import JawFracDataModule
-from jawfrac.models import JawFracModule, JawFracCascadeModule
+from jawfrac.models import LinearJawFracModule, LinearDisplacedJawFracModule
 
 
 def infer():
@@ -16,22 +16,15 @@ def infer():
         seed=config['seed'], **config['datamodule'],
     )
 
-    model = JawFracModule.load_from_checkpoint(
-        'checkpoints/fractures.ckpt',
-        in_channels=dm.num_channels,
-        num_classes=dm.num_classes,
-        **config['model'],
-    )
-
-    model = JawFracCascadeModule.load_from_checkpoint(
-        'checkpints/fractures_cascade.ckpt',
+    model = LinearJawFracModule.load_from_checkpoint(
+        'checkpoints/fractures_linear2.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )
 
     trainer = pl.Trainer(
-        # accelerator='gpu',
-        # devices=1,
+        accelerator='gpu',
+        devices=1,
         max_epochs=config['model']['epochs'],
     )
     preds = trainer.test(model, datamodule=dm)

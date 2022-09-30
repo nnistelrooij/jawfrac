@@ -1,6 +1,7 @@
 from typing import List, Tuple
 
-from scipy import ndimage
+import numpy as np
+from scipy import interpolate, ndimage
 import torch
 from torchtyping import TensorType
 
@@ -8,9 +9,15 @@ from torchtyping import TensorType
 def batch_forward(
     model: torch.nn.Module,
     features: TensorType['C', 'D', 'H', 'W', torch.float32],
-    patch_slices: List[Tuple[slice, slice, slice]],
+    patch_idxs: TensorType['P', 3, 2, torch.int64],
     batch_size: int=24,
 ):
+    # convert patch indices to patch slices
+    patch_slices = []
+    for patch_idxs in patch_idxs:
+        slices = tuple(slice(start, stop) for start, stop in patch_idxs)
+        patch_slices.append(slices)
+
     out = []
     for i in range(0, len(patch_slices), batch_size):
         # extract batch of patches from features volume
@@ -24,6 +31,100 @@ def batch_forward(
         x = torch.stack(x)
         pred = model(x)
         out.append(pred)
+
+    if isinstance(out[0], torch.Tensor):
+        return torch.cat(out)
+    else:
+        return tuple(map(lambda ts: torch.cat(ts), zip(*out)))
+
+
+def patches_subgrid(
+    patch_idxs: TensorType['P', 3, 2, torch.int64],
+) -> Tuple[
+    TensorType['P', 3, torch.int64],
+    List[TensorType['D', torch.float32]],
+    Tuple[int, int, int],
+]:
+    # determine subgrid covered by patches
+    subgrid_idxs, subgrid_points = [], []
+    for dim_patch_idxs in patch_idxs.permute(1, 0, 2):
+        unique, inverse = torch.unique(
+            input=dim_patch_idxs, return_inverse=True, dim=0,
+        )
+        subgrid_idxs.append(inverse)
+
+        centers = unique.float().mean(dim=1)
+        subgrid_points.append(centers)
+
+    subgrid_idxs = torch.column_stack(subgrid_idxs)
+    subgrid_shape = tuple(p.shape[0] for p in subgrid_points)
+
+    return subgrid_idxs, subgrid_points, subgrid_shape
+
+
+def interpolate_sparse_predictions(
+    pred: TensorType['d', 'h', 'w', '...', torch.float32],
+    subgrid_points: List[TensorType['dim', 3, torch.float32]],
+    out_shape: torch.Size,
+) -> TensorType['D', 'H', 'W', '...', torch.float32]:
+    # compute coordinates of output voxels
+    out_points = [np.arange(dim_size) + 0.5 for dim_size in out_shape]
+    out_points = np.meshgrid(*out_points, indexing='ij')
+    out_points = np.stack(out_points, axis=3)
+
+    # interpolate and extrapolate subgrid values to output voxels
+    out = interpolate.interpn(
+        points=[p.cpu() for p in subgrid_points],
+        values=pred.cpu(),
+        xi=out_points,
+        bounds_error=False,
+        fill_value=None,
+    )
+
+    return torch.from_numpy(out).to(pred)
+
+
+def aggregate_sparse_predictions(
+    pred: TensorType['P', '...', torch.float32],
+    patch_idxs: TensorType['P', 3, 2, torch.int64],
+    out_shape: torch.Size,
+) -> TensorType['D', 'H', 'W', '...', torch.float32]:
+    subgrid_idxs, subgrid_points, subgrid_shape = patches_subgrid(patch_idxs)
+
+    sparse_out = torch.zeros(subgrid_shape + pred.shape[1:]).to(pred)
+    index_arrays = tuple(subgrid_idxs.T)
+    sparse_out[index_arrays] = pred
+
+    out = interpolate_sparse_predictions(
+        sparse_out, subgrid_points, out_shape,
+    )
+
+    return out
+
+
+def aggregate_dense_predictions(
+    pred: TensorType['P', 'size', 'size', 'size', torch.float32],
+    patch_idxs: TensorType['P', 3, 2, torch.int64],
+    out_shape: torch.Size,
+    mode='max',
+) -> TensorType['D', 'H', 'W', torch.float32]:
+    # convert patch indices to patch slices
+    patch_slices = []
+    for patch_idxs in patch_idxs:
+        slices = tuple(slice(start, stop) for start, stop in patch_idxs)
+        patch_slices.append(slices)
+
+    if mode == 'max':
+        # compute maximum of overlapping predictions
+        out = torch.full(out_shape, -float('inf')).to(pred)
+        for slices, pred in zip(patch_slices, pred):
+            out[slices] = torch.maximum(out[slices], pred)
+    elif mode == 'mean':
+        # compute mean of overlapping predictions
+        out = torch.zeros(out_shape).to(pred)
+        for slices, pred in zip(patch_slices, pred):
+            out[slices] += pred
+    else: raise ValueError(f'Mode not recognized: {mode}.')
 
     return out
 

@@ -29,6 +29,7 @@ class JawFracDataModule(VolumeDataModule):
         displacements: bool,
         patch_size: int,
         expand_label: Dict[str, int],
+        gamma_adjust: bool,
         max_patches_per_scan: int,
         seed: int,
         **dm_cfg: Dict[str, Any],
@@ -48,6 +49,7 @@ class JawFracDataModule(VolumeDataModule):
         self.linear = linear
         self.displacements = displacements
         self.patch_size = patch_size
+        self.gamma_adjust = gamma_adjust
         self.max_patches_per_scan = max_patches_per_scan
 
     def _filter_files(self, pattern: str) -> List[Path]:
@@ -94,7 +96,7 @@ class JawFracDataModule(VolumeDataModule):
     ]:
         # take subsample of DataFrame comprised by given files
         df = pd.read_csv(self.root / 'Sophie overview 2.0.csv')
-        idxs = [int(f[0].parent.stem) - 1 for f in files]
+        idxs = [int(fs[0].parent.stem) - 1 for fs in files]
         df = df.iloc[idxs].reset_index()
 
         # make one-hot vectors about fracture region and displacement
@@ -152,13 +154,14 @@ class JawFracDataModule(VolumeDataModule):
                 T.IntensityAsFeatures(),
                 T.PositiveNegativePatches(
                     max_patches=self.max_patches_per_scan,
-                    pos_labels=[1]*self.linear + [2]*self.displacements,
+                    pos_classes=[1]*self.linear + [2]*self.displacements,
                     rng=rng,
                 ),
                 T.ToTensor(),
             )
             train_transforms = T.Compose(
                 T.RandomXAxisFlip(rng=rng),
+                T.RandomGammaAdjust(rng=rng) if self.gamma_adjust else dict,
                 T.RandomPatchTranslate(
                     max_voxels=self.patch_size // 4, rng=rng,
                 ),
@@ -220,21 +223,21 @@ class JawFracDataModule(VolumeDataModule):
     ) -> Tuple[
         TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
         Union[
-            TensorType['P', 'size', 'size', 'size', torch.bool],
+            TensorType['P', 'size', 'size', 'size', torch.float32],
             Tuple[
-                TensorType['P', 'size', 'size', 'size', torch.bool],
                 TensorType['P', torch.bool],
+                TensorType['P', 'size', 'size', 'size', torch.float32],
             ],
         ],
     ]:
         batch_dict = {key: [d[key] for d in batch] for key in batch[0]}
 
         features = torch.cat(batch_dict['features'])
-        masks = torch.cat(batch_dict['masks'])
         classes = torch.cat(batch_dict['classes'])
+        masks = torch.cat(batch_dict['masks'])
 
         if self.displacements:
-            return features, (masks, classes == 2)
+            return features, (classes == 2, masks)
         else:
             return features, masks
 
@@ -245,12 +248,12 @@ class JawFracDataModule(VolumeDataModule):
         TensorType['C', 'D', 'H', 'W', torch.float32],
         TensorType['D', 'H', 'W', torch.bool],
         TensorType['P', 3, 2, torch.int64],
-        TensorType['D', 'H', 'W', torch.bool],
+        TensorType['D', 'H', 'W', torch.float32],
     ]:
         features = batch[0]['features']
         mandible = batch[0]['mandible']
         patch_idxs = batch[0]['patch_idxs']
-        labels = batch[0]['labels'] > 0
+        labels = batch[0]['labels']
         
         return features, mandible, patch_idxs, labels
 

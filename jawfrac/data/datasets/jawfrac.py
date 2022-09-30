@@ -48,7 +48,11 @@ class JawFracDataset(VolumeDataset):
 
         # convert 8-bit to 12-bit
         if intensities.min() == 0 and intensities.max() == 255:
-            intensities = intensities / 255 * 4095 - 1024
+            center = intensities[intensities > 0].mean()
+            intensities = (intensities - center) / 255 * 4095
+
+        # clip intensities to sensible range
+        intensities = intensities.clip(-1024, 3071)
 
         seg = nibabel.load(self.root / mandible_file)
         mask = np.asarray(seg.dataobj) == 1

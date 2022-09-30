@@ -8,7 +8,7 @@ from torchtyping import TensorType
 
 from jawfrac.metrics import FracPrecision, FracRecall
 import jawfrac.nn as nn
-from jawfrac.models.jawfrac import (
+from jawfrac.models.jawfrac_linear import (
     batch_forward,
     fill_source_volume,
     filter_connected_components,
@@ -24,7 +24,7 @@ from jawfrac.visualization import (
 )
 
 
-class JawFracCascadeModule(pl.LightningModule):
+class LinearDisplacedJawFracModule(pl.LightningModule):
 
     def __init__(
         self,
@@ -32,7 +32,8 @@ class JawFracCascadeModule(pl.LightningModule):
         epochs: int,
         warmup_epochs: int,
         weight_decay: float,
-        two_stage: Dict[str, Any],
+        first_stage: Dict[str, Any],
+        second_stage: Dict[str, Any],
         focal_loss: bool,
         dice_loss: bool,
         conf_threshold: float,
@@ -41,8 +42,11 @@ class JawFracCascadeModule(pl.LightningModule):
     ) -> None:
         super().__init__()
 
-        two_stage = {k: v for k, v in two_stage.items() if k != 'use'}
-        self.model = nn.MandibleFracCascadeNet(**two_stage, **model_cfg)
+        # initialize model stages
+        self.mandible_net = nn.MandibleNet(**first_stage, **model_cfg)
+        self.frac_net = nn.JawFracNet(**second_stage, **model_cfg)
+        self.frac_cascade_net = nn.JawFracCascadeNet(**model_cfg)
+
         self.criterion = nn.JawFracLoss(focal_loss, dice_loss)
 
         self.confmat = ConfusionMatrix(num_classes=2)
@@ -61,30 +65,34 @@ class JawFracCascadeModule(pl.LightningModule):
 
     def forward(
         self,
-        x: TensorType['P', 'C', 'size', 'size', 'size', torch.float32],       
+        x: TensorType['P', 1, 'size', 'size', 'size', torch.float32],       
     ) -> Tuple[
         TensorType['B', 'D', 'H', 'W', torch.float32],
-        TensorType['B', 'D', 'H', 'W', torch.float32],
         TensorType['B', torch.float32],
+        TensorType['B', 'D', 'H', 'W', torch.float32],
     ]:
-        return self.model(x)
+        coords, mandible = self.mandible_net(x)
+        masks1 = self.frac_net(x, coords, mandible)
+        logits, masks2 = self.frac_cascade_net(x, mandible, masks1)
+
+        return masks1, logits, masks2
 
     def training_step(
         self,
         batch: Tuple[
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
             Tuple[
-                TensorType['P', 'size', 'size', 'size', torch.bool],
                 TensorType['P', torch.bool],
+                TensorType['P', 'size', 'size', 'size', torch.bool],
             ],
         ],
         batch_idx: int,
     ) -> TensorType[torch.float32]:
         x, y = batch
 
-        masks1, masks2, logits = self(x)
+        masks1, logits, masks2 = self(x)
 
-        loss, log_dict = self.criterion(masks1, masks2, logits, y)
+        loss, log_dict = self.criterion(masks1, logits, masks2, y)
         self.log_dict({
             k.replace('/', '/train_' if k[-1] != '/' else '/train'): v
             for k, v in log_dict.items()
@@ -97,35 +105,36 @@ class JawFracCascadeModule(pl.LightningModule):
         batch: Tuple[
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
             Tuple[
-                TensorType['P', 'size', 'size', 'size', torch.bool],
                 TensorType['P', torch.bool],
+                TensorType['P', 'size', 'size', 'size', torch.float32],
             ],
         ],
         batch_idx: int,
     ) -> None:
         x, y = batch
 
-        masks1, masks2, logits = self(x)
+        masks1, logits, masks2 = self(x)
 
-        _, log_dict = self.criterion(masks1, masks2, logits, y)
-
-        masks1 = torch.sigmoid(masks1) >= self.conf_thresh
-        self.f1_1(masks1.long().flatten(), y[0].long().flatten())
-
-        masks2 = torch.sigmoid(masks2) >= self.conf_thresh
-        self.f1_2(masks2.long().flatten(), y[0].long().flatten())
+        _, log_dict = self.criterion(masks1, logits, masks2, y)
 
         classes = logits >= 0
-        self.f1_3(classes.long(), y[1].long())
+        self.f1_1(classes.long(), y[0].long())
+
+        masks1 = torch.sigmoid(masks1) >= self.conf_thresh
+        self.f1_2(masks1.long().flatten(), y[1].long().flatten())
+
+        masks2 = torch.sigmoid(masks2) >= self.conf_thresh
+        self.f1_3(masks2.long().flatten(), y[1].long().flatten())
+
         
         self.log_dict({
             **{
                 k.replace('/', '/val_' if k[-1] != '/' else '/val'): v
                 for k, v in log_dict.items()
             },
-            'f1/val_masks1': self.f1_1,
-            'f1/val_masks2': self.f1_2,
-            'f1/val_classes': self.f1_3,
+            'f1/val_classes': self.f1_1,
+            'f1/val_masks1': self.f1_2,
+            'f1/val_masks2': self.f1_3,
         })
 
     def predict_volume(
@@ -162,7 +171,7 @@ class JawFracCascadeModule(pl.LightningModule):
             TensorType['C', 'D', 'H', 'W', torch.float32],
             TensorType['D', 'H', 'W', torch.bool],
             TensorType['P', 3, 2, torch.int64],
-            TensorType['D', 'H', 'W', torch.bool],
+            TensorType['D', 'H', 'W', torch.int64],
         ],
         batch_idx: int,
     ) -> None:
@@ -177,18 +186,18 @@ class JawFracCascadeModule(pl.LightningModule):
         # compute metrics
         self.confmat(
             torch.any(mask)[None].long(),
-            torch.any(target)[None].long(),
+            torch.any(target > 0)[None].long(),
         )
-        self.f1(mask.long().flatten(), target.long().flatten())
-        self.precision_metric(mask, target)
-        self.recall(mask, target)
+        self.f1(mask.long().flatten(), (target > 0).long().flatten())
+        self.precision_metric(mask, target > 0)
+        self.recall(mask, target > 0)
         
         # log metrics
         self.log('f1/test', self.f1)
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall)
         
-        draw_fracture_result(mandible, mask, target)
+        draw_fracture_result(mandible, mask, target > 0)
 
     def test_epoch_end(self, _) -> None:
         draw_confusion_matrix(self.confmat)

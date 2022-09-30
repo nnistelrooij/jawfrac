@@ -15,89 +15,12 @@ from jawfrac.optim.lr_scheduler import (
     LinearWarmupLR,
 )
 from jawfrac.models.common import (
+    aggregate_dense_predictions,
+    aggregate_sparse_predictions,
     batch_forward,
     fill_source_volume,
 )
 from jawfrac.visualization import draw_positive_voxels
-
-
-def patches_subgrid(
-    patch_idxs: TensorType['P', 3, 2, torch.int64],
-) -> Tuple[
-    TensorType['P', 3, torch.int64],
-    List[TensorType['D', torch.float32]],
-    Tuple[int, int, int],
-]:
-    # determine subgrid covered by patches
-    subgrid_idxs, subgrid_points = [], []
-    for dim_patch_idxs in patch_idxs.permute(1, 0, 2):
-        unique, inverse = torch.unique(
-            input=dim_patch_idxs, return_inverse=True, dim=0,
-        )
-        subgrid_idxs.append(inverse)
-
-        centers = unique.float().mean(dim=1)
-        subgrid_points.append(centers)
-
-    subgrid_idxs = torch.column_stack(subgrid_idxs)
-    subgrid_shape = tuple(p.shape[0] for p in subgrid_points)
-
-    return subgrid_idxs, subgrid_points, subgrid_shape
-
-
-def project_patches(
-    model: torch.nn.Module,
-    features: TensorType['C', 'D', 'H', 'W', torch.float32],
-    patch_idxs: TensorType['P', 3, 2, torch.int64],
-    subgrid_idxs: TensorType['P', 3, torch.int64],
-    subgrid_shape: Tuple[int, int, int],
-) -> Tuple[
-    TensorType['d', 'h', 'w', 3, torch.float32],
-    TensorType['D', 'H', 'W', torch.float32],
-]:
-    # convert patch indices to patch slices
-    patch_slices = []
-    for patch_idxs in patch_idxs:
-        slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-        patch_slices.append(slices)
-
-    # do model processing in batches
-    out = batch_forward(model, features, patch_slices)
-    coords, seg = map(lambda t: torch.cat(t), zip(*out))
-
-    # put position prediction in subgrid
-    out_coords = torch.zeros(subgrid_shape + (3,)).to(features)
-    index_arrays = tuple(subgrid_idxs.T)
-    out_coords[index_arrays] = coords
-
-    # compute maximum of overlapping predictions
-    out_seg = torch.full_like(features[0], -float('inf'))
-    for slices, seg in zip(patch_slices, seg):
-        out_seg[slices] = torch.maximum(out_seg[slices], seg)
-
-    return out_coords, out_seg
-
-
-def interpolate_positions(
-    coords: TensorType['d', 'h', 'w', 3, torch.float32],
-    subgrid_points: List[TensorType['D', 3, torch.float32]],
-    out_shape: Tuple[int, int, int],
-) -> TensorType['D', 'H', 'W', 3, torch.float32]:
-    # compute coordinates of output voxels
-    out_points = [np.arange(dim_size) + 0.5 for dim_size in out_shape]
-    out_points = np.meshgrid(*out_points, indexing='ij')
-    out_points = np.stack(out_points, axis=3)
-
-    # interpolate subgrid values to output voxels
-    out_coords = interpolate.interpn(
-        points=[p.cpu() for p in subgrid_points],
-        values=coords.cpu(),
-        xi=out_points,
-        bounds_error=False,
-        fill_value=None,
-    )
-
-    return torch.from_numpy(out_coords).to(coords)
 
 
 def filter_connected_components(
@@ -236,18 +159,15 @@ class MandibleSegModule(pl.LightningModule):
         TensorType['D', 'H', 'W', 3, torch.float32],
         TensorType['D', 'H', 'W', torch.float32],
     ]:
-        # determine subgrid covered by patches
-        subgrid = patches_subgrid(patch_idxs)
-        idxs, points, shape = subgrid
+        coords, seg = batch_forward(self.model, features, patch_idxs)
 
-        # combine overlapping voxel predictions
-        coords, seg = project_patches(
-            self.model, features, patch_idxs, idxs, shape,
+        coords = aggregate_sparse_predictions(
+            coords, patch_idxs, features.shape[1:],
         )
-
-        # interpolate relative position predictions
-        coords = interpolate_positions(coords, points, seg.shape)
-
+        seg = aggregate_dense_predictions(
+            seg, patch_idxs, features.shape[1:],
+        )
+        
         return coords, seg
 
     def test_step(

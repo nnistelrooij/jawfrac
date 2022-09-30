@@ -11,6 +11,7 @@ from torch_scatter import scatter_mean
 from jawfrac.metrics import FracPrecision, FracRecall
 import jawfrac.nn as nn
 from jawfrac.models.common import (
+    aggregate_dense_predictions,
     batch_forward,
     fill_source_volume,
 )
@@ -45,7 +46,7 @@ def filter_connected_components(
     )
     count_mask = component_counts >= min_component_size
 
-    # determine components with mean confidence at least 0.70
+    # determine components with mean confidence at least conf_thresh
     component_probs = scatter_mean(
         src=probs.flatten(),
         index=component_idxs.flatten(),
@@ -60,7 +61,7 @@ def filter_connected_components(
     return volume_mask
 
 
-class JawFracModule(pl.LightningModule):
+class LinearJawFracModule(pl.LightningModule):
 
     def __init__(
         self,
@@ -68,7 +69,8 @@ class JawFracModule(pl.LightningModule):
         epochs: int,
         warmup_epochs: int,
         weight_decay: float,
-        two_stage: Dict[str, Any],
+        first_stage: Dict[str, Any],
+        second_stage: Dict[str, Any],
         focal_loss: bool,
         dice_loss: bool,
         conf_threshold: float,
@@ -77,11 +79,10 @@ class JawFracModule(pl.LightningModule):
     ) -> None:
         super().__init__()
 
-        if two_stage['use']:
-            two_stage = {k: v for k, v in two_stage.items() if k != 'use'}
-            self.model = nn.MandibleFracNet(**two_stage, **model_cfg)
-        else:
-            self.model = nn.FracNet(**model_cfg)
+        self.mandible_net = nn.MandibleNet(**first_stage, **model_cfg)
+        self.frac_net = nn.JawFracNet(
+            coords=second_stage['coords'], **model_cfg,
+        )
 
         self.criterion = nn.SegmentationLoss(focal_loss, dice_loss)
 
@@ -99,17 +100,18 @@ class JawFracModule(pl.LightningModule):
 
     def forward(
         self,
-        x: TensorType['P', 'C', 'size', 'size', 'size', torch.float32],       
+        x: TensorType['P', 1, 'size', 'size', 'size', torch.float32],       
     ) -> TensorType['P', 'size', 'size', 'size', torch.float32]:
-        x = self.model(x)
+        coords, mandible = self.mandible_net(x)
+        seg = self.frac_net(x, coords, mandible)
 
-        return x
+        return seg
 
     def training_step(
         self,
         batch: Tuple[
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
-            TensorType['P', 'size', 'size', 'size', torch.int64],
+            TensorType['P', 'size', 'size', 'size', torch.float32],
         ],
         batch_idx: int,
     ) -> TensorType[torch.float32]:
@@ -117,7 +119,7 @@ class JawFracModule(pl.LightningModule):
 
         x = self(x)
 
-        loss = self.criterion(x, y.float())
+        loss = self.criterion(x, y)
 
         self.log('loss/train', loss)
 
@@ -127,7 +129,7 @@ class JawFracModule(pl.LightningModule):
         self,
         batch: Tuple[
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
-            TensorType['P', 'size', 'size', 'size', torch.int64],
+            TensorType['P', 'size', 'size', 'size', torch.float32],
         ],
         batch_idx: int,
     ) -> None:
@@ -135,11 +137,11 @@ class JawFracModule(pl.LightningModule):
 
         x = self(x)
 
-        loss = self.criterion(x, y.float())
+        loss = self.criterion(x, y)
         x = torch.sigmoid(x) >= self.conf_thresh
         self.f1(
             x.long().flatten(),
-            (y > 0).long().flatten(),
+            (y >= self.conf_thresh).long().flatten(),
         )
 
         self.log('loss/val', loss)
@@ -149,29 +151,14 @@ class JawFracModule(pl.LightningModule):
         self,
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
         patch_idxs: TensorType['P', 3, 2, torch.int64],
-        batch_size: int=12,
     ) -> TensorType['D', 'H', 'W', torch.float32]:
-        # convert patch indices to patch slices
-        patch_slices = []
-        for patch_idxs in patch_idxs:
-            slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-            patch_slices.append(slices)
-
         # do model processing in batches
-        out = batch_forward(self.model, features, patch_slices)
-        seg = torch.cat(out)
+        seg = batch_forward(self, features, patch_idxs)
 
-        # compute maximum of overlapping predictions
-        out = torch.full_like(features[0], -float('inf'))
-        for slices, seg in zip(patch_slices, seg):
-            out[slices] = torch.maximum(out[slices], seg)
+        # aggregate predictions of voxel predictions in multiple patches
+        seg = aggregate_dense_predictions(seg, patch_idxs, features.shape[1:])
 
-        # # compute mean of overlapping predictions
-        # out = torch.zeros_like(features[0])
-        # for slices, seg in zip(patch_slices, seg):
-        #     out[slices] += seg
-
-        return out
+        return seg
 
     def test_step(
         self,
@@ -179,11 +166,11 @@ class JawFracModule(pl.LightningModule):
             TensorType['C', 'D', 'H', 'W', torch.float32],
             TensorType['D', 'H', 'W', torch.bool],
             TensorType['P', 3, 2, torch.int64],
-            TensorType['D', 'H', 'W', torch.bool],
+            TensorType['D', 'H', 'W', torch.float32],
         ],
         batch_idx: int,
     ) -> None:
-        features, mandible, patch_idxs, target = batch
+        features, mandible, patch_idxs, labels = batch
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)
@@ -192,6 +179,7 @@ class JawFracModule(pl.LightningModule):
         )
 
         # compute metrics
+        target = (self.conf_thresh < labels) & (labels <= 1)
         self.confmat(
             torch.any(mask)[None].long(),
             torch.any(target)[None].long(),
@@ -205,7 +193,7 @@ class JawFracModule(pl.LightningModule):
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall)
         
-        draw_fracture_result(mandible, mask, target)
+        # draw_fracture_result(mandible, mask, target)
 
     def test_epoch_end(self, _) -> None:
         draw_confusion_matrix(self.confmat)

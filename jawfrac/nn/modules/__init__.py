@@ -1,8 +1,4 @@
-from jawfrac.nn.modules.jawfrac import FracNet
 from jawfrac.nn.modules.loss import SegmentationLoss
 from jawfrac.nn.modules.mandibles import MandibleLoss, MandibleNet
-from jawfrac.nn.modules.mandibles_jawfrac import MandibleFracNet
-from jawfrac.nn.modules.mandibles_jawfrac_cascade import (
-    MandibleFracCascadeNet,
-    JawFracLoss
-)
+from jawfrac.nn.modules.jawfrac import JawFracNet
+from jawfrac.nn.modules.jawfrac_cascade import JawFracCascadeNet, JawFracLoss

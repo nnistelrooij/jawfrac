@@ -1,3 +1,3 @@
-from jawfrac.models.jawfrac import JawFracModule
-from jawfrac.models.jawfrac_cascade import JawFracCascadeModule
+from jawfrac.models.jawfrac_linear import LinearJawFracModule
+from jawfrac.models.jawfrac_linear_displaced import LinearDisplacedJawFracModule
 from jawfrac.models.mandibles import MandibleSegModule

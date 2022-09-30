@@ -52,6 +52,7 @@ class MandibleNet(nn.Module):
             state_dict = torch.load(checkpoint_path)['state_dict']
             state_dict = {k[6:]: v for k, v in state_dict.items()}
             self.load_state_dict(state_dict)
+            self.requires_grad_(False)
 
     def forward(
         self,

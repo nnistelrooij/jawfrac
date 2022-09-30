@@ -1,5 +1,5 @@
 work_dir: '/home/mka3dlab/Documents/logs/fractures'
-version: only_linear
+version: linear_displaced_smooth
 seed: 0
 
 model:
@@ -10,10 +10,11 @@ model:
   weight_decay: 0.0
   num_awms: 0
   backbone: 'conv'
-  two_stage:
-    use: True
-    coords: null
+  first_stage:
     checkpoint_path: 'checkpoints/mandibles_positions_size=0.4.ckpt'
+  second_stage:
+    coords: null
+    checkpoint_path: 'checkpoints/fractures_linear2.ckpt'
   focal_loss: True
   dice_loss: False
   conf_threshold: 0.2
@@ -24,7 +25,7 @@ datamodule:
   # root: '/mnt/diag/nielsvannistelrooij/fractures'
   regex_filter: 'Annotation UK'
   linear: True
-  displacements: False
+  displacements: True
   val_size: 0.2
   test_size: 0.2
   batch_size: 4
@@ -38,5 +39,7 @@ datamodule:
   expand_label:
     bone_iters: 1
     all_iters: 1
+    smooth: 0.5
     negative_iters: 16
+  gamma_adjust: False
   max_patches_per_scan: 4

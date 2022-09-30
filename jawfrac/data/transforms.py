@@ -130,8 +130,9 @@ class RegularSpacing:
         zoom = spacing / self.spacing
 
         # interpolate intensities volume to given voxel spacing
+        min_value, max_value = intensities.min(), intensities.max()
         intensities = ndimage.zoom(input=intensities, zoom=zoom)
-        data_dict['intensities'] = intensities
+        data_dict['intensities'] = intensities.clip(min_value, max_value)
         
         # interpolate mandible segmentation to given voxel spacing
         if 'mandible' in data_dict:
@@ -233,7 +234,7 @@ class PatchIndices:
 
         data_dict['intensities'] = intensities
         data_dict['patch_idxs'] = patch_idxs
-        data_dict['patch_labels'] = np.full((patch_idxs.shape[0],), -1)
+        data_dict['patch_classes'] = np.full((patch_idxs.shape[0],), -1)
 
         return data_dict
 
@@ -271,7 +272,7 @@ class BonePatchIndices:
 
         data_dict['intensities'] = intensities
         data_dict['patch_idxs'] = data_dict['patch_idxs'][patches_mask]
-        data_dict['patch_labels'] = data_dict['patch_labels'][patches_mask]
+        data_dict['patch_classes'] = data_dict['patch_classes'][patches_mask]
 
         return data_dict
 
@@ -315,7 +316,7 @@ class MandiblePatchIndices:
 
         data_dict['intensities'] = intensities
         data_dict['patch_idxs'] = data_dict['patch_idxs'][patches_mask]
-        data_dict['patch_labels'] = data_dict['patch_labels'][patches_mask]
+        data_dict['patch_classes'] = data_dict['patch_classes'][patches_mask]
 
         return data_dict
 
@@ -341,7 +342,7 @@ class PositiveNegativeIndices:
         labels: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        patch_labels = []
+        patch_classes = []
         for patch_idxs in data_dict['patch_idxs']:
             # extract a patch from the volume
             slices = tuple(slice(start, stop) for start, stop in patch_idxs)
@@ -349,10 +350,10 @@ class PositiveNegativeIndices:
             
             # determine if patch contains sufficient foreground voxels
             label = 1 if patch.mean() >= self.volume_thresh else 0
-            patch_labels.append(label)
+            patch_classes.append(label)
 
         data_dict['labels'] = labels
-        data_dict['patch_labels'] = np.array(patch_labels)
+        data_dict['patch_classes'] = np.array(patch_classes)
 
         return data_dict
 
@@ -400,17 +401,17 @@ class LinearFracturePatchIndices:
         patch_idxs += diff[..., np.newaxis]
 
         # update or set new patch indices and labels
-        patch_labels = np.full(patch_idxs.shape[0], self.fg_label)
+        patch_classes = np.full(patch_idxs.shape[0], self.fg_label)
         if 'patch_idxs' in data_dict:
             data_dict['patch_idxs'] = np.concatenate(
                 (data_dict['patch_idxs'], patch_idxs),
             )
-            data_dict['patch_labels'] = np.concatenate(
-                (data_dict['patch_labels'], patch_labels),
+            data_dict['patch_classes'] = np.concatenate(
+                (data_dict['patch_classes'], patch_classes),
             )
         else:
             data_dict['patch_idxs'] = patch_idxs
-            data_dict['patch_labels'] = patch_labels
+            data_dict['patch_classes'] = patch_classes
 
         return data_dict
 
@@ -491,12 +492,14 @@ class ExpandLabel:
         bone_iters: int,
         all_iters: int,
         negative_iters: int,
+        smooth: float,
         bone_intensity_threshold: int=300,
     ) -> None:
         self.bone_iters = bone_iters
         self.bone_intensity_thresh = bone_intensity_threshold
         self.all_iters = all_iters
         self.negative_iters = negative_iters
+        self.smooth = smooth
 
     def __call__(
         self,
@@ -533,6 +536,14 @@ class ExpandLabel:
             )
             labels[(labels == 0) & dilation] = -1
 
+        labels = labels.astype(np.float32)
+        if self.smooth:
+            blur = ndimage.gaussian_filter(
+                input=(labels == 1).astype(np.float32),
+                sigma=self.smooth,
+            )
+            labels[blur > 0] = blur[blur > 0]
+
         data_dict['intensities'] = intensities
         data_dict['labels'] = labels
 
@@ -544,6 +555,7 @@ class ExpandLabel:
             f'    bone_iters={self.bone_iters},',
             f'    bone_intensity_threshold={self.bone_intensity_thresh},',
             f'    all_iters={self.all_iters},',
+            f'    smooth={self.smooth},',
             ')',
         ])
 
@@ -553,11 +565,11 @@ class NegativeIndices:
     def __call__(
         self,
         labels: NDArray[Any],
-        patch_labels: NDArray[Any],
+        patch_classes: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         for i, patch_idxs in enumerate(data_dict['patch_idxs']):
-            if patch_labels[i] != -1:
+            if patch_classes[i] != -1:
                 continue
 
             # extract a patch from the volume
@@ -565,10 +577,10 @@ class NegativeIndices:
             patch = labels[slices]
             
             # save patch without foreground voxels
-            patch_labels[i] = -1 * np.any(patch)
+            patch_classes[i] = -1 * np.any(patch)
 
         data_dict['labels'] = labels
-        data_dict['patch_labels'] = patch_labels
+        data_dict['patch_classes'] = patch_classes
 
         return data_dict
 
@@ -612,6 +624,42 @@ class RandomXAxisFlip:
         return '\n'.join([
             self.__class__.__name__ + '(',
             f'    p={self.p},',
+            ')',
+        ])
+
+
+class RandomGammaAdjust:
+
+    def __init__(
+        self,
+        low: float=0.8,
+        high: float=1.2,
+        rng: Optional[np.random.Generator]=None
+    ) -> None:
+        self.low = low
+        self.range = high - low
+        self.rng = rng if rng is not None else np.random.default_rng()
+
+    def __call__(
+        self,
+        intensities: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        gamma = self.low + self.range * self.rng.random()
+
+        intensities = (intensities + 1024) / 4095
+        intensities = intensities ** gamma
+        intensities = (intensities * 4095) - 1024
+
+        data_dict['intensities'] = intensities
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '()',
+            f'    low={self.low},',
+            f'    high={self.low + self.range / 2},',
             ')',
         ])
 
@@ -699,8 +747,7 @@ class IntensityAsFeatures:
     ) -> Dict[str, Any]:
         data_dict['intensities'] = intensities
 
-        intensities = intensities.clip(-1024, 3071).astype(float)
-
+        intensities = intensities.astype(float)
         if 'features' in data_dict:
             data_dict['features'] = np.concatenate(
                 (data_dict['features'], intensities[np.newaxis]),
@@ -719,11 +766,11 @@ class PositiveNegativePatches:
     def __init__(
         self,
         max_patches: int,
-        pos_labels: List[int]=[1],
+        pos_classes: List[int]=[1],
         rng: Optional[np.random.Generator]=None,
     ) -> None:
         self.max_pos_patches = max_patches // 2
-        self.pos_labels = np.array([pos_labels]).T
+        self.pos_classes = np.array([pos_classes]).T
         self.rng = rng if rng is not None else np.random.default_rng()
 
     def __call__(
@@ -731,17 +778,17 @@ class PositiveNegativePatches:
         features: NDArray[np.float64],
         labels: NDArray[Any],
         patch_idxs: NDArray[Any],
-        patch_labels: NDArray[np.int64],
+        patch_classes: NDArray[np.int64],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         # sample at most self.max_pos_patches positive patches from scan
-        pos_mask = np.any(patch_labels == self.pos_labels, axis=0)
+        pos_mask = np.any(patch_classes == self.pos_classes, axis=0)
         pos_idxs = pos_mask.nonzero()[0]
         pos_idxs = self.rng.permutation(pos_idxs)
         pos_idxs = pos_idxs[:self.max_pos_patches]
 
         # sample as many negative patches as positive patches
-        neg_idxs = (patch_labels == 0).nonzero()[0]
+        neg_idxs = (patch_classes == 0).nonzero()[0]
         neg_idxs = self.rng.permutation(neg_idxs)
         neg_idxs = neg_idxs[:pos_idxs.shape[0]]
 
@@ -752,7 +799,9 @@ class PositiveNegativePatches:
         patch_features, patch_masks = [], []
         for patch_idxs in patch_idxs[pos_neg_idxs]:
             slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-            patch_masks.append(labels[slices] == 1)
+            patch_mask = labels[slices].copy()
+            patch_mask[(patch_mask < 0) | (1 < patch_mask)] = 0
+            patch_masks.append(patch_mask)
 
             slices = (slice(None),) + slices
             patch_features.append(features[slices])
@@ -760,7 +809,7 @@ class PositiveNegativePatches:
         # stack patches to make batch
         data_dict['features'] = np.stack(patch_features)
         data_dict['masks'] = np.stack(patch_masks)
-        data_dict['classes'] = patch_labels[pos_neg_idxs]
+        data_dict['classes'] = patch_classes[pos_neg_idxs]
         if 'patch_coords' in data_dict:
             data_dict['coords'] = data_dict['patch_coords'][pos_neg_idxs]
 
@@ -770,7 +819,7 @@ class PositiveNegativePatches:
         return '\n'.join([
             self.__class__.__name__ + '(',
             f'    max_patches={2 * self.max_pos_patches},',
-            f'    pos_labels={self.pos_labels.flatten().tolist()},',
+            f'    pos_classes={self.pos_classes.flatten().tolist()},',
             ')',
         ])
 
