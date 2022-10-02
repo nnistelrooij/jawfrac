@@ -22,7 +22,6 @@ from jawfrac.optim.lr_scheduler import (
 from jawfrac.visualization import (
     draw_confusion_matrix,
     draw_fracture_result,
-    draw_positive_voxels,
 )
 
 
@@ -32,8 +31,7 @@ def filter_connected_components(
     min_component_size: int,
 ) -> TensorType['D', 'H', 'W', torch.bool]:
     # determine connected components in volume
-    probs = torch.sigmoid(seg)
-    labels = (probs >= conf_thresh).long()
+    labels = (seg >= conf_thresh).long()
     component_idxs, _ = ndimage.label(
         input=labels.cpu(),
         structure=ndimage.generate_binary_structure(3, 1),
@@ -48,10 +46,10 @@ def filter_connected_components(
 
     # determine components with mean confidence at least conf_thresh
     component_probs = scatter_mean(
-        src=probs.flatten(),
+        src=seg.flatten(),
         index=component_idxs.flatten(),
     )
-    print(probs.amax())
+    print(seg.amax())
     prob_mask = component_probs >= conf_thresh
 
     # project masks back to volume
@@ -65,6 +63,7 @@ class LinearJawFracModule(pl.LightningModule):
 
     def __init__(
         self,
+        num_classes: int,
         lr: float,
         epochs: int,
         warmup_epochs: int,
@@ -79,9 +78,10 @@ class LinearJawFracModule(pl.LightningModule):
     ) -> None:
         super().__init__()
 
-        self.mandible_net = nn.MandibleNet(**first_stage, **model_cfg)
+        self.mandible_net = nn.MandibleNet(
+            num_classes=1, **first_stage, **model_cfg)
         self.frac_net = nn.JawFracNet(
-            coords=second_stage['coords'], **model_cfg,
+            num_classes=1, coords=second_stage['coords'], **model_cfg,
         )
 
         self.criterion = nn.SegmentationLoss(focal_loss, dice_loss)
@@ -140,8 +140,8 @@ class LinearJawFracModule(pl.LightningModule):
         loss = self.criterion(x, y)
         x = torch.sigmoid(x) >= self.conf_thresh
         self.f1(
-            x.long().flatten(),
-            (y >= self.conf_thresh).long().flatten(),
+            x[y != -1].long(),
+            (y[y != -1] >= self.conf_thresh).long(),
         )
 
         self.log('loss/val', loss)
@@ -154,6 +154,7 @@ class LinearJawFracModule(pl.LightningModule):
     ) -> TensorType['D', 'H', 'W', torch.float32]:
         # do model processing in batches
         seg = batch_forward(self, features, patch_idxs)
+        seg = torch.sigmoid(seg)
 
         # aggregate predictions of voxel predictions in multiple patches
         seg = aggregate_dense_predictions(seg, patch_idxs, features.shape[1:])
@@ -179,7 +180,7 @@ class LinearJawFracModule(pl.LightningModule):
         )
 
         # compute metrics
-        target = (self.conf_thresh < labels) & (labels <= 1)
+        target = (self.conf_thresh <= labels) & (labels <= 1)
         self.confmat(
             torch.any(mask)[None].long(),
             torch.any(target)[None].long(),
@@ -193,7 +194,8 @@ class LinearJawFracModule(pl.LightningModule):
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall)
         
-        # draw_fracture_result(mandible, mask, target)
+        # visualize results with Open3D
+        draw_fracture_result(mandible, mask, labels >= self.conf_thresh)
 
     def test_epoch_end(self, _) -> None:
         draw_confusion_matrix(self.confmat)
@@ -216,8 +218,6 @@ class LinearJawFracModule(pl.LightningModule):
         mask = filter_connected_components(
             x ,self.conf_thresh, self.min_component_size,
         )
-
-        draw_positive_voxels(mask)
 
         out = fill_source_volume(mask, affine, shape)
         

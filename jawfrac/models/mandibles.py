@@ -107,7 +107,7 @@ class MandibleSegModule(pl.LightningModule):
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
             Tuple[
                 TensorType['P', 3, torch.float32],
-                TensorType['P', 'size', 'size', 'size', torch.bool],
+                TensorType['P', 'size', 'size', 'size', torch.float32],
             ],
         ],
         batch_idx: int,
@@ -131,7 +131,7 @@ class MandibleSegModule(pl.LightningModule):
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
             Tuple[
                 TensorType['P', 3, torch.float32],
-                TensorType['P', 'size', 'size', 'size', torch.bool],
+                TensorType['P', 'size', 'size', 'size', torch.float32],
             ],
         ],
         batch_idx: int,
@@ -141,7 +141,7 @@ class MandibleSegModule(pl.LightningModule):
         coords, seg = self(x)
 
         _, log_dict = self.criterion(coords, seg, y)
-        self.f1((seg >= 0).long().flatten(), y[1].long().flatten())
+        self.f1((seg[y[1] != -1] >= 0).long(), y[1][y[1] != -1].long())
 
         self.log_dict({
             **{
@@ -175,7 +175,7 @@ class MandibleSegModule(pl.LightningModule):
         batch: Tuple[
             TensorType['C', 'D', 'H', 'W', torch.float32],
             TensorType['P', 3, 2, torch.int64],
-            TensorType['D', 'H', 'W', torch.bool],
+            TensorType['D', 'H', 'W', torch.float32],
         ],
         batch_idx: int,
     ) -> None:

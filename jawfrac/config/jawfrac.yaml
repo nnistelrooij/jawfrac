@@ -1,5 +1,5 @@
 work_dir: '/home/mka3dlab/Documents/logs/fractures'
-version: linear_displaced_smooth
+version: 31
 seed: 0
 
 model:
@@ -32,7 +32,9 @@ datamodule:
   num_workers: 1
   pin_memory: True
   persistent_workers: True
-  mandible_crop_padding: 10.0  # mm
+  mandible_crop:
+    padding: 10.0  # mm
+    extend: True
   regular_spacing: 0.4  # mm
   patch_size: 64
   stride: 48
@@ -43,3 +45,5 @@ datamodule:
     negative_iters: 16
   gamma_adjust: False
   max_patches_per_scan: 4
+  class_label_to_idx: [0, 1, 1]
+  ignore_outside: True

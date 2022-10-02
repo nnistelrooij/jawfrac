@@ -23,7 +23,7 @@ RUN pip install torch-scatter -f https://data.pyg.org/whl/torch-1.11.0+cu113.htm
 # copy package and main file
 ENV LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/conda/lib/
 COPY --chown=algorithm:algorithm jawfrac/ jawfrac/
-COPY --chown=algorithm:algorithm train_fractures.py .
+COPY --chown=algorithm:algorithm train_mandibles.py .
 
 # script to run
-ENTRYPOINT ["python", "/opt/algorithm/train_fractures.py"]
+ENTRYPOINT ["python", "/opt/algorithm/train_mandibles.py"]

@@ -31,6 +31,8 @@ class JawFracDataModule(VolumeDataModule):
         expand_label: Dict[str, int],
         gamma_adjust: bool,
         max_patches_per_scan: int,
+        ignore_outside: bool,
+        class_label_to_idx: List[int],
         seed: int,
         **dm_cfg: Dict[str, Any],
     ) -> None:
@@ -51,6 +53,8 @@ class JawFracDataModule(VolumeDataModule):
         self.patch_size = patch_size
         self.gamma_adjust = gamma_adjust
         self.max_patches_per_scan = max_patches_per_scan
+        self.ignore_outside = ignore_outside
+        self.class_label_to_idx = torch.tensor(class_label_to_idx)
 
     def _filter_files(self, pattern: str) -> List[Path]:
         files = super(type(self), self)._filter_files(pattern)
@@ -94,6 +98,9 @@ class JawFracDataModule(VolumeDataModule):
         List[Tuple[Path, ...]],
         List[Tuple[Path, ...]],
     ]:
+        if self.val_size == 1:
+            return [], files, []
+
         # take subsample of DataFrame comprised by given files
         df = pd.read_csv(self.root / 'Sophie overview 2.0.csv')
         idxs = [int(fs[0].parent.stem) - 1 for fs in files]
@@ -155,6 +162,7 @@ class JawFracDataModule(VolumeDataModule):
                 T.PositiveNegativePatches(
                     max_patches=self.max_patches_per_scan,
                     pos_classes=[1]*self.linear + [2]*self.displacements,
+                    ignore_outside=self.ignore_outside,
                     rng=rng,
                 ),
                 T.ToTensor(),
@@ -215,7 +223,7 @@ class JawFracDataModule(VolumeDataModule):
 
     @property
     def num_classes(self) -> int:
-        return 1
+        return torch.unique(self.class_label_to_idx).shape[0]
 
     def fit_collate_fn(
         self,
@@ -225,7 +233,7 @@ class JawFracDataModule(VolumeDataModule):
         Union[
             TensorType['P', 'size', 'size', 'size', torch.float32],
             Tuple[
-                TensorType['P', torch.bool],
+                TensorType['P', torch.int64],
                 TensorType['P', 'size', 'size', 'size', torch.float32],
             ],
         ],
@@ -233,13 +241,17 @@ class JawFracDataModule(VolumeDataModule):
         batch_dict = {key: [d[key] for d in batch] for key in batch[0]}
 
         features = torch.cat(batch_dict['features'])
-        classes = torch.cat(batch_dict['classes'])
         masks = torch.cat(batch_dict['masks'])
 
-        if self.displacements:
-            return features, (classes == 2, masks)
-        else:
+        if not self.displacements:
             return features, masks
+        
+        classes = torch.cat(batch_dict['classes'])
+        masks[classes == 2] = -1
+
+        classes = self.class_label_to_idx[classes]
+
+        return features, (classes, masks)
 
     def test_collate_fn(
         self,

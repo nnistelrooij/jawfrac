@@ -1,3 +1,5 @@
+from typing import Union
+
 import torch
 import torch.nn as nn
 from torchtyping import TensorType
@@ -10,6 +12,7 @@ class SegmentationLoss(nn.Module):
         self,
         focal_loss: bool,
         dice_loss: bool,
+        ignore_index: int=-1,
     ) -> None:
         super().__init__()
 
@@ -17,16 +20,26 @@ class SegmentationLoss(nn.Module):
         
         self.focal_loss = focal_loss
         self.dice_loss = dice_loss
+        self.ignore_index = ignore_index
 
     def forward(
         self,
         pred: TensorType['B', '...', torch.float32],
-        target: TensorType['B', '...', torch.float32],
+        target: Union[
+            TensorType['B', '...', torch.bool],
+            TensorType['B', '...', torch.float32],
+        ],
     ) -> TensorType[torch.float32]:
-        if pred.numel() == 0:
-            return 0
-
         target = target.float()
+
+        # remove voxels to be ignored
+        pred = pred[target != self.ignore_index]
+        target = target[target != self.ignore_index]
+
+        # return zero loss if all voxels have been removed
+        if pred.numel() == 0:
+            return torch.tensor(0).to(pred)
+
         loss = self.bce(pred, target)
 
         if self.focal_loss:

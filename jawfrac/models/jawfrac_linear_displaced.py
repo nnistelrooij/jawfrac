@@ -8,11 +8,13 @@ from torchtyping import TensorType
 
 from jawfrac.metrics import FracPrecision, FracRecall
 import jawfrac.nn as nn
-from jawfrac.models.jawfrac_linear import (
+from jawfrac.models.common import (
+    aggregate_sparse_predictions,
+    aggregate_dense_predictions,
     batch_forward,
     fill_source_volume,
-    filter_connected_components,
 )
+from jawfrac.models.jawfrac_linear import filter_connected_components
 from jawfrac.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearWarmupLR,
@@ -20,7 +22,6 @@ from jawfrac.optim.lr_scheduler import (
 from jawfrac.visualization import (
     draw_confusion_matrix,
     draw_fracture_result,
-    draw_positive_voxels,
 )
 
 
@@ -28,6 +29,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
 
     def __init__(
         self,
+        num_classes: int,
         lr: float,
         epochs: int,
         warmup_epochs: int,
@@ -43,19 +45,27 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         super().__init__()
 
         # initialize model stages
-        self.mandible_net = nn.MandibleNet(**first_stage, **model_cfg)
-        self.frac_net = nn.JawFracNet(**second_stage, **model_cfg)
-        self.frac_cascade_net = nn.JawFracCascadeNet(**model_cfg)
+        self.mandible_net = nn.MandibleNet(
+            num_classes=1, **first_stage, **model_cfg,
+        )
+        self.frac_net = nn.JawFracNet(
+            num_classes=1, **second_stage, **model_cfg,
+        )
+        self.frac_cascade_net = nn.JawFracCascadeNet(
+            num_classes=num_classes, **model_cfg,
+        )
 
-        self.criterion = nn.JawFracLoss(focal_loss, dice_loss)
+        # initialize loss function
+        self.criterion = nn.JawFracLoss(num_classes, focal_loss, dice_loss)
 
         self.confmat = ConfusionMatrix(num_classes=2)
-        self.f1_1 = F1Score(num_classes=2, average='macro')
+        self.f1_1 = F1Score(num_classes=num_classes, average='macro')
         self.f1_2 = F1Score(num_classes=2, average='macro')
         self.f1_3 = F1Score(num_classes=2, average='macro')
         self.precision_metric = FracPrecision()
         self.recall = FracRecall()
 
+        self.num_classes = max(2, num_classes)
         self.lr = lr
         self.epochs = epochs
         self.warmup_epochs = warmup_epochs
@@ -105,7 +115,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         batch: Tuple[
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
             Tuple[
-                TensorType['P', torch.bool],
+                TensorType['P', torch.int64],
                 TensorType['P', 'size', 'size', 'size', torch.float32],
             ],
         ],
@@ -115,18 +125,24 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
 
         masks1, logits, masks2 = self(x)
 
+        # losses
         _, log_dict = self.criterion(masks1, logits, masks2, y)
 
-        classes = logits >= 0
-        self.f1_1(classes.long(), y[0].long())
+        # classification metric
+        if self.num_classes == 2:
+            classes = (logits >= 0).long()
+        else:
+            classes = logits.argmax(dim=1)
+        self.f1_1(classes, y[0])
 
+        # segmentation metrics
         masks1 = torch.sigmoid(masks1) >= self.conf_thresh
-        self.f1_2(masks1.long().flatten(), y[1].long().flatten())
-
         masks2 = torch.sigmoid(masks2) >= self.conf_thresh
-        self.f1_3(masks2.long().flatten(), y[1].long().flatten())
-
+        target = y[1] >= self.conf_thresh
+        self.f1_2(masks1[y[1] != -1].long(), target[y[1] != -1].long())
+        self.f1_3(masks2[y[1] != -1].long(), target[y[1] != -1].long())
         
+        # log metrics
         self.log_dict({
             **{
                 k.replace('/', '/val_' if k[-1] != '/' else '/val'): v
@@ -137,33 +153,28 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             'f1/val_masks2': self.f1_3,
         })
 
-    def predict_volume(
+    def predict_volumes(
         self,
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
         patch_idxs: TensorType['P', 3, 2, torch.int64],
-        batch_size: int=12,
-    ) -> TensorType['D', 'H', 'W', torch.float32]:
-        # convert patch indices to patch slices
-        patch_slices = []
-        for patch_idxs in patch_idxs:
-            slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-            patch_slices.append(slices)
+    ) -> Tuple[
+        TensorType['D', 'H', 'W', torch.float32],
+        TensorType['D', 'H', 'W', torch.float32],
+    ]:
+        # perform model inference in batches
+        masks, logits, _ = batch_forward(self, features, patch_idxs)
+        seg, probs = torch.sigmoid(masks), torch.sigmoid(logits)
 
-        # do model processing in batches
-        out = batch_forward(self.model, features, patch_slices)
-        seg = torch.cat([masks1 for masks1, masks2, logits in out])
+        # aggregate predictions from multiple patches
+        linear = aggregate_dense_predictions(
+            seg, patch_idxs, features.shape[1:],
+        )
+        displaced = aggregate_sparse_predictions(
+            probs, patch_idxs, features.shape[1:],
+        )
+        displaced = displaced.clip(0, 1)
 
-        # compute maximum of overlapping predictions
-        out = torch.full_like(features[0], -float('inf'))
-        for slices, seg in zip(patch_slices, seg):
-            out[slices] = torch.maximum(out[slices], seg)
-
-        # # compute mean of overlapping predictions
-        # out = torch.zeros_like(features[0])
-        # for slices, seg in zip(patch_slices, seg):
-        #     out[slices] += seg
-
-        return out
+        return linear, displaced
 
     def test_step(
         self,
@@ -171,16 +182,25 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             TensorType['C', 'D', 'H', 'W', torch.float32],
             TensorType['D', 'H', 'W', torch.bool],
             TensorType['P', 3, 2, torch.int64],
-            TensorType['D', 'H', 'W', torch.int64],
+            TensorType['D', 'H', 'W', torch.float32],
         ],
         batch_idx: int,
     ) -> None:
         features, mandible, patch_idxs, target = batch
 
-        # predict binary segmentation
-        x = self.predict_volume(features, patch_idxs)
+        # predict binary segmentations
+        linear, displaced = self.predict_volumes(features, patch_idxs)
+
+        # filter connected components in each volume separately
+        mask = (linear + displaced) / 2
+        linear = filter_connected_components(
+            linear, self.conf_thresh, self.min_component_size,
+        )
+        displaced = filter_connected_components(
+            displaced, 0.8, self.min_component_size,
+        )
         mask = filter_connected_components(
-            x, self.conf_thresh, self.min_component_size,
+            mask, 0.5, self.min_component_size,
         )
 
         # compute metrics
@@ -188,16 +208,19 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             torch.any(mask)[None].long(),
             torch.any(target > 0)[None].long(),
         )
-        self.f1(mask.long().flatten(), (target > 0).long().flatten())
-        self.precision_metric(mask, target > 0)
-        self.recall(mask, target > 0)
+        self.f1_2(
+            linear.long().flatten(),
+            (target >= self.conf_thresh).long().flatten(),
+        )
+        self.precision_metric(mask, target > self.conf_thresh)
+        self.recall(mask, target > self.conf_thresh)
         
         # log metrics
-        self.log('f1/test', self.f1)
+        self.log('f1/test', self.f1_2)
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall)
         
-        draw_fracture_result(mandible, mask, target > 0)
+        draw_fracture_result(mandible, mask, target > self.conf_thresh)
 
     def test_epoch_end(self, _) -> None:
         draw_confusion_matrix(self.confmat)
@@ -205,27 +228,35 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
     def predict_step(
         self,
         batch: Tuple[
-            TensorType['C', 'D', 'H', 'W', torch.float32],
+            TensorType[1, 'D', 'H', 'W', torch.float32],
             TensorType['P', 3, 2, torch.int64],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
         ],
         batch_idx: int,
-    ) -> TensorType['P', torch.float32]:
+    ) -> Tuple[
+        TensorType['D', 'H', 'W', torch.bool],
+        TensorType['D', 'H', 'W', torch.bool],
+    ]:
         features, patch_idxs, affine, shape = batch
 
-        # predict binary segmentation
-        x = self.predict_volume(features, patch_idxs)
+        # predict dense binary segmentations
+        linear, displaced = self.predict_volumes(features, patch_idxs)
 
-        mask = filter_connected_components(
-            x ,self.conf_thresh, self.min_component_size,
+        # filter small connected components
+        linear[displaced >= self.conf_thresh] = 0
+        linear = filter_connected_components(
+            linear, self.conf_thresh, self.min_component_size,
+        )
+        displaced = filter_connected_components(
+            displaced, self.conf_thresh, self.min_component_size,
         )
 
-        draw_positive_voxels(mask)
-
-        out = fill_source_volume(mask, affine, shape)
+        # fill corresponding voxels in source volume
+        linear = fill_source_volume(linear, affine, shape)
+        displaced = fill_source_volume(displaced, affine, shape)
         
-        return out
+        return linear, displaced
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],

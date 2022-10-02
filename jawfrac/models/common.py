@@ -116,7 +116,7 @@ def aggregate_dense_predictions(
 
     if mode == 'max':
         # compute maximum of overlapping predictions
-        out = torch.full(out_shape, -float('inf')).to(pred)
+        out = torch.zeros(out_shape).to(pred)
         for slices, pred in zip(patch_slices, pred):
             out[slices] = torch.maximum(out[slices], pred)
     elif mode == 'mean':

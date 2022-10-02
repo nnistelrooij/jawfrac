@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -32,13 +32,15 @@ class JawFracCascadeNet(nn.Module):
             nn.Linear(128, 64),
             nn.BatchNorm1d(64, momentum=0.1),
             nn.ReLU(),
-            nn.Linear(64, 1),
+            nn.Linear(64, 1 if num_classes <= 2 else num_classes),
         )
         self.seg_head = nn.Conv3d(
             in_channels=32,
             out_channels=1,
             kernel_size=1,
         )
+
+        self.num_classes = max(2, num_classes)
 
     def forward(
         self,
@@ -58,26 +60,40 @@ class JawFracCascadeNet(nn.Module):
         # determine whether patch has displaced fracture
         xs = self.encoder(x)
         embedding = xs[0].mean(dim=(2, 3, 4))
-        logits = self.class_head(embedding).squeeze(dim=1)
+        logits = self.class_head(embedding)
+        logits = logits.squeeze(dim=1) if self.num_classes == 2 else logits
 
         # determine fracture segmentation of remaining patches
         x = self.decoder(xs)
         x = self.seg_head(x)
+        x = x.squeeze(dim=1)
 
-        return logits, x.squeeze(dim=1)
+        return logits, x
 
 
 class JawFracLoss(nn.Module):
 
     def __init__(
         self,
+        num_classes: int,
         focal_loss: bool,
         dice_loss: bool,
+        ignore_index: int=-1,
+        beta: float=0.1,
     ) -> None:
         super().__init__()
         
-        self.seg_criterion = SegmentationLoss(focal_loss, dice_loss)
-        self.bce = nn.BCEWithLogitsLoss()
+        if num_classes <= 2:
+            self.class_criterion = nn.BCEWithLogitsLoss()
+        else:
+            self.class_criterion = nn.CrossEntropyLoss()
+
+        self.seg_criterion = SegmentationLoss(
+            focal_loss, dice_loss, ignore_index,
+        )
+
+        self.num_classes = max(2, num_classes)
+        self.beta = beta
 
     def forward(
         self,
@@ -85,7 +101,7 @@ class JawFracLoss(nn.Module):
         logits: TensorType['P', torch.float32],
         masks2: TensorType['p', 'size', 'size', 'size', torch.float32],
         target: Tuple[
-            TensorType['P', torch.bool],
+            TensorType['P', torch.int64],
             TensorType['P', 'size', 'size', 'size', torch.float32],
         ],
     ) -> Tuple[
@@ -94,21 +110,26 @@ class JawFracLoss(nn.Module):
     ]:
         y_classes, y_masks = target
 
-        bce_loss = self.bce(logits, y_classes.float())
+        y_classes = y_classes.float() if self.num_classes == 2 else y_classes
+        class_loss = self.class_criterion(logits, y_classes)
 
-        # do not provide segmentation feedback for displaced fractures
-        masks1 = masks1[logits < 0]
-        masks2 = masks2[logits < 0]
-        y_masks = y_masks[logits < 0]
-        seg_loss1 = self.seg_criterion(masks1, y_masks)
-        seg_loss2 = self.seg_criterion(masks2, y_masks)
+        if self.num_classes == 2:
+            # only provide segmentation feedback on patches without displacements
+            seg_loss1 = self.seg_criterion(masks1, y_masks)
+            seg_loss2 = self.seg_criterion(masks2, y_masks)
 
-        loss = bce_loss + seg_loss1 + seg_loss2
-        log_dict = {
-            'loss/': loss,
-            'loss/bce': bce_loss,
-            'loss/seg1': seg_loss1,
-            'loss/seg2': seg_loss2,
-        }
+            loss = self.beta * class_loss + seg_loss1 + seg_loss2
+            log_dict = {
+                'loss/': loss,
+                'loss/class': class_loss,
+                'loss/seg1': seg_loss1,
+                'loss/seg2': seg_loss2,
+            }
+        else:
+            loss = class_loss
+            log_dict = {
+                'loss/': loss,
+                'loss/class': class_loss,
+            }
 
         return loss, log_dict

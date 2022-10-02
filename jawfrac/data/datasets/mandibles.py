@@ -27,6 +27,7 @@ class MandibleSegDataset(VolumeDataset):
             T.PatchIndices(patch_size=patch_size, stride=stride),
             T.BonePatchIndices(),
             T.PositiveNegativeIndices() if stage == 'fit' else dict,
+            T.MandibleStatistics(),
         )
 
         super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)

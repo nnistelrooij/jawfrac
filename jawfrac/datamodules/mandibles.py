@@ -20,6 +20,7 @@ class MandibleSegDataModule(VolumeDataModule):
         root: Union[str, Path],
         patch_size: int,
         max_patches_per_scan: int,
+        ignore_outside: bool,
         **dm_cfg: Dict[str, Any],
     ) -> None:
         # use files functions from JawFrac when inferring for fracture data
@@ -41,6 +42,7 @@ class MandibleSegDataModule(VolumeDataModule):
 
         self.patch_size = patch_size
         self.max_patches_per_scan = max_patches_per_scan
+        self.ignore_outside = ignore_outside
 
     def _filter_files(self, pattern: str) -> List[Path]:
         files = super()._filter_files(pattern)
@@ -75,15 +77,15 @@ class MandibleSegDataModule(VolumeDataModule):
                 T.RelativePatchCoordinates(),
                 T.IntensityAsFeatures(),
                 T.PositiveNegativePatches(
-                    max_patches=self.max_patches_per_scan, rng=rng,
+                    max_patches=self.max_patches_per_scan,
+                    ignore_outside=self.ignore_outside,
+                    rng=rng,
                 ),
                 T.ToTensor(),
             )
             train_transforms = T.Compose(
                 T.RandomXAxisFlip(rng=rng),
-                T.RandomPatchTranslate(
-                    max_voxels=self.patch_size // 4, rng=rng,
-                ),
+                T.RandomPatchTranslate(max_voxels=16, rng=rng),
                 val_transforms,
             )
 
@@ -136,14 +138,14 @@ class MandibleSegDataModule(VolumeDataModule):
         TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
         Tuple[
             TensorType['P', 3, torch.float32],
-            TensorType['P', 'size', 'size', 'size', torch.bool],
+            TensorType['P', 'size', 'size', 'size', torch.float32],
         ],
     ]:
         batch_dict = {key: [d[key] for d in batch] for key in batch[0]}
 
         features = torch.cat(batch_dict['features'])
         coords = torch.cat(batch_dict['coords'])
-        labels = torch.cat(batch_dict['labels'])
+        labels = torch.cat(batch_dict['masks'])
 
         return features, (coords, labels)
 
@@ -153,7 +155,7 @@ class MandibleSegDataModule(VolumeDataModule):
     ) -> Tuple[
         TensorType['C', 'D', 'H', 'W', torch.float32],
         TensorType['P', 3, 2, torch.int64],
-        TensorType['D', 'H', 'W', torch.bool],
+        TensorType['D', 'H', 'W', torch.float32],
     ]:
         features = batch[0]['features']
         patch_idxs = batch[0]['patch_idxs']

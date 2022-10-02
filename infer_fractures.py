@@ -11,6 +11,8 @@ def infer():
     with open('jawfrac/config/jawfrac.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
+    pl.seed_everything(config['seed'], workers=True)
+
     config['datamodule']['batch_size'] = 1
     dm = JawFracDataModule(
         seed=config['seed'], **config['datamodule'],
@@ -18,6 +20,11 @@ def infer():
 
     model = LinearJawFracModule.load_from_checkpoint(
         'checkpoints/fractures_linear2.ckpt',
+        num_classes=dm.num_classes,
+        **config['model'],
+    )
+    model = LinearDisplacedJawFracModule.load_from_checkpoint(
+        'checkpoints/fractures_linear_displaced3.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )

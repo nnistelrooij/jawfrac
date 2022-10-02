@@ -40,8 +40,8 @@ class MandibleNet(nn.Module):
 
         self.loc_head = nn.Sequential(
             nn.Linear(128 + 448 * (backbone == 'swin'), 64),
-            nn.BatchNorm1d(64, momentum=0.1), 
-            nn.ReLU(), 
+            nn.BatchNorm1d(64, momentum=0.1),
+            nn.ReLU(),
             nn.Linear(64, 3)
         )
         

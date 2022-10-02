@@ -1,5 +1,5 @@
 work_dir: '/home/mka3dlab/Documents/logs/mandibles'
-version: 27
+version: 31
 seed: 0
 
 model:
@@ -10,16 +10,16 @@ model:
   weight_decay: 0
   backbone: 'conv'
   num_awms: 0
-  focal_loss: True
+  focal_loss: False
   dice_loss: False
 
 datamodule:
-  # root: '/mnt/diag/nielsvannistelrooij/Fabian'
-  root: '/home/mka3dlab/Documents/fractures'
-  regex_filter: 'Annotation UK'
+  root: '/mnt/diag/nielsvannistelrooij/Fabian'
+  # root: '/home/mka3dlab/Documents/fractures'
+  regex_filter: ''
   val_size: 0.2
   test_size: 0.0
-  batch_size: 1
+  batch_size: 4
   num_workers: 1
   pin_memory: True
   persistent_workers: True
@@ -27,3 +27,4 @@ datamodule:
   patch_size: 64
   stride: 48
   max_patches_per_scan: 4
+  ignore_outside: True
