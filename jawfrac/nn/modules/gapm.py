@@ -45,9 +45,9 @@ class AdaptiveWindowingModule(nn.Module):
         za = za.mean(dim=(1, 2, 3, 4), keepdim=True)
         zb = zb.mean(dim=(1, 2, 3, 4), keepdim=True)
 
-        # compute scales between 0.5 and 1.5
-        alpha = torch.sigmoid(za) + 0.5
-        beta = torch.sigmoid(zb) + 0.5
+        # compute scales between 0 and 1
+        alpha = torch.sigmoid(za)
+        beta = torch.sigmoid(zb)
 
         # compute new window boundaries
         pred_min = alpha * self.min
@@ -55,7 +55,7 @@ class AdaptiveWindowingModule(nn.Module):
 
         # apply windowing to get intensities between -1 and 1
         x = x.clip(pred_min, pred_max)
-        x = (x - pred_min) / (pred_max - pred_min)
+        x = (x - pred_min) / (pred_max - pred_min + 1e-6)
         x = (x * 2) - 1
 
         return x
@@ -67,8 +67,8 @@ class GrayscaleAdaptivePerceptionModule(nn.Module):
         self,
         num_awms: int=3,
         awm_channels: int=16,
-        init_level: float=450.0,  # 40.5,
-        init_width: float=1100.0,  # 350.0,
+        init_level: float=1036.0,  # 40.5,
+        init_width: float=4120.0,  # 350.0,
     ) -> None:
         super().__init__()
 
@@ -81,6 +81,9 @@ class GrayscaleAdaptivePerceptionModule(nn.Module):
             )
             self.awms.append(awm)
 
+        self.min = init_level - init_width / 2
+        self.max = init_level + init_width / 2
+
     def forward(
         self,
         x: TensorType['B', 1, 'D', 'H', 'W', torch.float32],
@@ -88,5 +91,9 @@ class GrayscaleAdaptivePerceptionModule(nn.Module):
         xs = []
         for awm in self.awms:
             xs.append(awm(x))
+
+        x = (x - self.min) / (self.max - self.min)
+        x = (x * 2) - 1
+        xs.append(x)
 
         return torch.cat(xs, dim=1)

@@ -66,22 +66,31 @@ def interpolate_sparse_predictions(
     pred: TensorType['d', 'h', 'w', '...', torch.float32],
     subgrid_points: List[TensorType['dim', 3, torch.float32]],
     out_shape: torch.Size,
+    scale: int=4,
 ) -> TensorType['D', 'H', 'W', '...', torch.float32]:
     # compute coordinates of output voxels
-    out_points = [np.arange(dim_size) + 0.5 for dim_size in out_shape]
-    out_points = np.meshgrid(*out_points, indexing='ij')
-    out_points = np.stack(out_points, axis=3)
+    points_down = []
+    for dim in out_shape:
+        points = np.linspace(0, dim - dim % scale, num=dim // scale + 1)
+        points_down.append(points + scale * 0.5)
+    points_down = np.meshgrid(*points_down, indexing='ij')
+    points_down = np.stack(points_down, axis=3)
 
     # interpolate and extrapolate subgrid values to output voxels
-    out = interpolate.interpn(
+    out_down = interpolate.interpn(
         points=[p.cpu() for p in subgrid_points],
         values=pred.cpu(),
-        xi=out_points,
+        xi=points_down,
         bounds_error=False,
         fill_value=None,
     )
+    out_down = torch.from_numpy(out_down).to(pred)
 
-    return torch.from_numpy(out).to(pred)
+    # repeat values to scale up interpolated predictions
+    out_interp = out_down.tile(scale, scale, scale, 1)
+    out_interp = out_interp[tuple(slice(None, dim) for dim in out_shape)]
+
+    return out_interp
 
 
 def aggregate_sparse_predictions(
@@ -91,12 +100,13 @@ def aggregate_sparse_predictions(
 ) -> TensorType['D', 'H', 'W', '...', torch.float32]:
     subgrid_idxs, subgrid_points, subgrid_shape = patches_subgrid(patch_idxs)
 
-    sparse_out = torch.zeros(subgrid_shape + pred.shape[1:]).to(pred)
+    out = torch.zeros(subgrid_shape + pred.shape[1:])
+    out = out.to(pred) + pred.amin(dim=0)
     index_arrays = tuple(subgrid_idxs.T)
-    sparse_out[index_arrays] = pred
+    out[index_arrays] = pred
 
     out = interpolate_sparse_predictions(
-        sparse_out, subgrid_points, out_shape,
+        out, subgrid_points, out_shape,
     )
 
     return out
@@ -116,7 +126,8 @@ def aggregate_dense_predictions(
 
     if mode == 'max':
         # compute maximum of overlapping predictions
-        out = torch.zeros(out_shape).to(pred)
+        out = torch.zeros(out_shape)
+        out = out.to(pred) + pred.amin()
         for slices, pred in zip(patch_slices, pred):
             out[slices] = torch.maximum(out[slices], pred)
     elif mode == 'mean':

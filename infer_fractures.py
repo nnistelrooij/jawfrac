@@ -24,7 +24,7 @@ def infer():
         **config['model'],
     )
     model = LinearDisplacedJawFracModule.load_from_checkpoint(
-        'checkpoints/fractures_linear_displaced3.ckpt',
+        'checkpoints/fractures_linear_displaced4.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )

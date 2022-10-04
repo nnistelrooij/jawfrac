@@ -21,10 +21,10 @@ def train():
         num_classes=dm.num_classes,
         **config['model'],
     )
-    model = LinearDisplacedJawFracModule(
-        num_classes=dm.num_classes,
-        **config['model'],
-    )
+    # model = LinearDisplacedJawFracModule(
+    #     num_classes=dm.num_classes,
+    #     **config['model'],
+    # )
 
 
     logger = TensorBoardLogger(

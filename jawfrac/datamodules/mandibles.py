@@ -114,11 +114,12 @@ class MandibleSegDataModule(VolumeDataModule):
             )
 
         if stage is None or stage == 'predict':
-            files = self._files('predict')[:2]
+            files = self._files('predict')
+            files = [f for f in files if not (self.root / f[0].parent / 'mandible2.nii.gz').exists()]
 
             self.predict_dataset = MandibleSegDataset(
                 stage='predict',
-                files=files,
+                files=files[:1],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )

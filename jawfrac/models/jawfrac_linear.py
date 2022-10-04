@@ -26,9 +26,11 @@ from jawfrac.visualization import (
 
 
 def filter_connected_components(
+    mandible: TensorType['D', 'H', 'W', torch.bool],
     seg: TensorType['D', 'H', 'W', torch.float32],
     conf_thresh: float,
     min_component_size: int,
+    max_dist: float=100.0,
 ) -> TensorType['D', 'H', 'W', torch.bool]:
     # determine connected components in volume
     labels = (seg >= conf_thresh).long()
@@ -52,8 +54,24 @@ def filter_connected_components(
     print(seg.amax())
     prob_mask = component_probs >= conf_thresh
 
+    # determine components within max_dist voxels of mandible
+    voxels = torch.cartesian_prod(*[torch.arange(d) for d in seg.shape]).to(seg)
+    component_centroids = scatter_mean(
+        src=voxels.reshape(-1, 3),
+        index=component_idxs.flatten(),
+        dim=0,
+    )
+    component_centroids = component_centroids.reshape(-1, 1, 3)
+
+    mandible_voxels = mandible.nonzero()[::4].float()
+    mandible_voxels = mandible_voxels.reshape(1, -1, 3)
+
+    dists = torch.sum((component_centroids - mandible_voxels) ** 2, dim=2)
+    component_dists = dists.amin(dim=1)
+    dist_mask = component_dists < max_dist
+
     # project masks back to volume
-    component_mask = count_mask & prob_mask
+    component_mask = count_mask & prob_mask & dist_mask
     volume_mask = component_mask[component_idxs]
 
     return volume_mask
@@ -79,9 +97,13 @@ class LinearJawFracModule(pl.LightningModule):
         super().__init__()
 
         self.mandible_net = nn.MandibleNet(
-            num_classes=1, **first_stage, **model_cfg)
+            num_classes=1, **first_stage, **model_cfg,
+        )
         self.frac_net = nn.JawFracNet(
-            num_classes=1, coords=second_stage['coords'], **model_cfg,
+            num_classes=1,
+            mandible_channels=self.mandible_net.out_channels,
+            coords=second_stage['coords'],
+            **model_cfg,
         )
 
         self.criterion = nn.SegmentationLoss(focal_loss, dice_loss)
@@ -176,11 +198,11 @@ class LinearJawFracModule(pl.LightningModule):
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)
         mask = filter_connected_components(
-            x, self.conf_thresh, self.min_component_size,
+            mandible, x, self.conf_thresh, self.min_component_size,
         )
 
         # compute metrics
-        target = (self.conf_thresh <= labels) & (labels <= 1)
+        target = labels >= self.conf_thresh
         self.confmat(
             torch.any(mask)[None].long(),
             torch.any(target)[None].long(),

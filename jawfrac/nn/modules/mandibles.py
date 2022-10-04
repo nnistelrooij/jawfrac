@@ -17,6 +17,8 @@ class MandibleNet(nn.Module):
         num_classes: int,
         channels_list: List[int],
         backbone: str,
+        head_kernel_size: int,
+        return_features: bool=False,
         checkpoint_path: str='',
     ) -> None:
         super().__init__()
@@ -28,6 +30,7 @@ class MandibleNet(nn.Module):
                 channels_list=channels_list,
                 num_awms=num_awms,
             )
+            num_features = channels_list[1]
         elif backbone == 'swin':
             self.unet = SwinUNETRBackbone(
                 img_size=64,
@@ -35,18 +38,25 @@ class MandibleNet(nn.Module):
                 out_channels=1,
                 feature_size=36,
             )
+            num_features = 36
         else:
             raise ValueError(f'Backbone not recognized: {backbone}.')
 
+        num_latents = channels_list[-1] if backbone == 'conv' else 16 * 36
         self.loc_head = nn.Sequential(
-            nn.Linear(128 + 448 * (backbone == 'swin'), 64),
+            nn.Linear(num_latents, 64),
             nn.BatchNorm1d(64, momentum=0.1),
             nn.ReLU(),
             nn.Linear(64, 3)
         )
         
         # self.loc_head = nn.Linear(64, 3)
-        self.seg_head = nn.Conv3d(32 + 4 * (backbone == 'swin'), num_classes, 3, padding=1)
+        self.seg_head = nn.Conv3d(
+            num_features,
+            num_classes,
+            head_kernel_size,
+            padding=head_kernel_size // 2,
+        )
 
         if checkpoint_path:
             state_dict = torch.load(checkpoint_path)['state_dict']
@@ -54,20 +64,29 @@ class MandibleNet(nn.Module):
             self.load_state_dict(state_dict)
             self.requires_grad_(False)
 
+        self.return_features = return_features
+        self.out_channels = 1 + return_features * num_features
+
     def forward(
         self,
         x: TensorType['B', 1, 'D', 'H', 'W', torch.float32],
     ) -> Tuple[
         TensorType['B', 3, torch.float32],
-        TensorType['B', 'C', 'D', 'H', 'W', torch.float32],
+        TensorType['B', '[C]', 'D', 'H', 'W', torch.float32],
     ]:
-        encoding, x = self.unet(x)
+        encoding, features = self.unet(x)
 
         embedding = encoding.mean(axis=(2, 3, 4))
         coords = self.loc_head(embedding)
-        seg = self.seg_head(x)
 
-        return coords, seg.squeeze(dim=1)
+        seg = self.seg_head(features)
+
+        if self.return_features:
+            out = torch.cat((seg, features), dim=1)
+        else:
+            out = seg.squeeze(dim=1)
+
+        return coords, out
 
 
 class MandibleLoss(nn.Module):

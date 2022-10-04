@@ -49,10 +49,15 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             num_classes=1, **first_stage, **model_cfg,
         )
         self.frac_net = nn.JawFracNet(
-            num_classes=1, **second_stage, **model_cfg,
+            num_classes=1,
+            mandible_channels=self.mandible_net.out_channels,
+            **second_stage,
+            **model_cfg,
         )
         self.frac_cascade_net = nn.JawFracCascadeNet(
-            num_classes=num_classes, **model_cfg,
+            num_classes=num_classes,
+            mandible_channels=self.mandible_net.out_channels,
+            **model_cfg,
         )
 
         # initialize loss function
@@ -163,16 +168,15 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
     ]:
         # perform model inference in batches
         masks, logits, _ = batch_forward(self, features, patch_idxs)
-        seg, probs = torch.sigmoid(masks), torch.sigmoid(logits)
 
         # aggregate predictions from multiple patches
         linear = aggregate_dense_predictions(
-            seg, patch_idxs, features.shape[1:],
+            torch.sigmoid(masks), patch_idxs, features.shape[1:],
         )
         displaced = aggregate_sparse_predictions(
-            probs, patch_idxs, features.shape[1:],
+            logits, patch_idxs, features.shape[1:],
         )
-        displaced = displaced.clip(0, 1)
+        displaced = torch.sigmoid(displaced)
 
         return linear, displaced
 
@@ -194,13 +198,13 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         # filter connected components in each volume separately
         mask = (linear + displaced) / 2
         linear = filter_connected_components(
-            linear, self.conf_thresh, self.min_component_size,
+            mandible, linear, self.conf_thresh, self.min_component_size,
         )
         displaced = filter_connected_components(
-            displaced, 0.8, self.min_component_size,
+            mandible, displaced, 0.8, self.min_component_size,
         )
         mask = filter_connected_components(
-            mask, 0.5, self.min_component_size,
+            mandible, mask, 0.5, self.min_component_size,
         )
 
         # compute metrics
@@ -220,7 +224,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall)
         
-        draw_fracture_result(mandible, mask, target > self.conf_thresh)
+        draw_fracture_result(mandible, mask, target >= self.conf_thresh)
 
     def test_epoch_end(self, _) -> None:
         draw_confusion_matrix(self.confmat)

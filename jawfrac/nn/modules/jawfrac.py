@@ -5,7 +5,6 @@ import torch.nn as nn
 from torchtyping import TensorType
 
 from jawfrac.nn.modules.convnet import ConvTransposeBlock
-from jawfrac.nn.modules.mandibles import MandibleNet
 from jawfrac.nn.modules.swin_unetr import SwinUNETRBackbone
 from jawfrac.nn.modules.unet import Decoder, Encoder
 
@@ -16,6 +15,7 @@ class JawFracNet(nn.Module):
         self,
         num_awms: int,
         num_classes: int,
+        mandible_channels: int,
         channels_list: List[int],
         backbone: str,
         coords: Optional[str],
@@ -29,23 +29,23 @@ class JawFracNet(nn.Module):
 
         if backbone == 'conv':
             self.encoder = Encoder(
-                in_channels=2 + 3 * (coords == 'dense'),
+                in_channels=1 + mandible_channels + 3 * ('dense' in coords),
                 channels_list=channels_list,
             )
             self.decoder = Decoder(
                 num_classes=1,
-                channels_list=[128 + 3 * (coords == 'sparse'), 64, 32, 16],
+                channels_list=[128 + 3 * ('sparse' in coords), 64, 32, 16],
             )
         elif backbone == 'swin':
             self.unet = SwinUNETRBackbone(
                 img_size=64,
-                in_channels=2 + 3 * (coords == 'dense'),
+                in_channels=1 + mandible_channels + 3 * ('dense' in coords),
                 out_channels=1,
             )
         else:
             raise ValueError(f'Backbone not recognized: {backbone}.')
 
-        if coords == 'sparse':
+        if 'dynamic' in coords and 'sparse' in coords:
             self.init_sparse_coords()
 
         self.head = nn.Conv3d(
@@ -87,11 +87,12 @@ class JawFracNet(nn.Module):
         self,
         x: TensorType['B', 1, 'D', 'H', 'W', torch.float32],
         coords: TensorType['B', 3, torch.float32],
-        mandible: TensorType['B', 'D', 'H', 'W', torch.float32],
+        mandible: TensorType['B', '[C]', 'D', 'H', 'W', torch.float32],
     ) -> TensorType['B', 'D', 'H', 'W', torch.float32]:
-        x = torch.cat((x, mandible.unsqueeze(dim=1)), dim=1)
+        mandible = mandible.reshape(x.shape[:1] + (-1,) + x.shape[2:])
+        x = torch.cat((x, mandible), dim=1)
 
-        if self.coords == 'dense':
+        if 'dynamic' in self.coords and 'dense' in self.coords:
             voxel_coords = torch.linspace(-0.4, 0.4, steps=x.shape[-1])
             voxel_coords = torch.cartesian_prod(*voxel_coords.tile(3, 1))
             voxel_coords = voxel_coords.reshape(1, *x.shape[2:], 3).to(coords)
@@ -99,15 +100,23 @@ class JawFracNet(nn.Module):
             voxel_coords[..., 0] = torch.abs(voxel_coords[..., 0])  # left-right symmetry
             voxel_coords = voxel_coords.permute(0, 4, 1, 2, 3)
             x = torch.cat((x, voxel_coords), dim=1)
+        elif 'dense' in self.coords:
+            voxel_coords = coords.tile(*x.shape[2:], 1, 1)
+            voxel_coords = voxel_coords.permute(3, 4, 0, 1, 2)
+            x = torch.cat((x, voxel_coords), dim=1)
 
         if self.backbone == 'conv':
             xs = self.encoder(x)
 
-        if coords == 'sparse':
+        if 'dynamic' in self.coords and 'sparse' in self.coords:
             coords = self.coords_linear(coords)
             coords = coords.reshape(-1, 3, 2, 2, 2)
             coords = self.coords_conv(coords)
             xs[0] = torch.cat((xs[0], coords), dim=1)
+        elif 'sparse' in self.coords:
+            voxel_coords = coords.tile(*xs[0].shape[2:], 1, 1)
+            voxel_coords = voxel_coords.permute(3, 4, 0, 1, 2)
+            xs[0] = torch.cat((xs[0], voxel_coords), dim=1)
 
         if self.backbone == 'conv':
             x = self.decoder(xs)

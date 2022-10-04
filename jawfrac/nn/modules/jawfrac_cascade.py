@@ -14,13 +14,14 @@ class JawFracCascadeNet(nn.Module):
         self,
         num_awms: int,
         num_classes: int,
+        mandible_channels: int,
         channels_list: List[int],
         backbone: str,
     ) -> None:
         super().__init__()
 
         self.encoder = Encoder(
-            in_channels=3,
+            in_channels=2 + mandible_channels,
             channels_list=channels_list,
         )
         self.decoder = Decoder(
@@ -45,15 +46,16 @@ class JawFracCascadeNet(nn.Module):
     def forward(
         self,
         x: TensorType['B', 1, 'D', 'H', 'W', torch.float32],
-        mandible: TensorType['B', 'D', 'H', 'W', torch.float32],
+        mandible: TensorType['B', '[C]', 'D', 'H', 'W', torch.float32],
         fractures: TensorType['B', 'D', 'H', 'W', torch.float32],
     ) -> Tuple[
         TensorType['B', torch.float32],
         TensorType['B', 'D', 'H', 'W', torch.float32],
     ]:
-        # concatenate intensities and mandible and fracture logits
+        # concatenate intensities, mandible, and fracture features
+        mandible = mandible.reshape(x.shape[:1] + (-1,) + x.shape[2:])
         x = torch.cat(
-            (x, mandible.unsqueeze(dim=1), fractures.unsqueeze(dim=1)),
+            (x, mandible, fractures.unsqueeze(dim=1)),
             dim=1,
         )
 

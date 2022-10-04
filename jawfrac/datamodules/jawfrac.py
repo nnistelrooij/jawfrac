@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import ShuffleSplit
 from skmultilearn.model_selection import IterativeStratification
 import torch
 from torchtyping import TensorType
@@ -59,21 +60,21 @@ class JawFracDataModule(VolumeDataModule):
     def _filter_files(self, pattern: str) -> List[Path]:
         files = super(type(self), self)._filter_files(pattern)
 
-        if self.filter == 'Controls':
-            return files
+        patient_files = [f for f in files if 'Controls' not in str(f)]
+        control_files = [f for f in files if 'Controls' in str(f)]
 
         df = pd.read_csv(self.root / 'Sophie overview 2.0.csv')
         mask = df['Note'].isna() & (
-            (self.displacements & df['Displaced'])
+            (getattr(self, 'displacements', True) & df['Displaced'])
             |
-            (self.linear & df['Linear'])
+            (getattr(self, 'linear', True) & df['Linear'])
         )
         idxs = df.index[mask]
 
-        patients = [int(f.parent.stem) for f in files]
-        files = [f for f, p in zip(files, patients) if p - 1 in idxs]
+        patients = [int(f.parent.stem) - 1 for f in patient_files]
+        patient_files = [f for f, p in zip(patient_files, patients) if p in idxs]
 
-        return files
+        return patient_files + control_files
 
     def _files(self, stage: str) -> List[Tuple[Path, ...]]:
         scan_files = self._filter_files('**/*main*.nii.gz')
@@ -101,9 +102,10 @@ class JawFracDataModule(VolumeDataModule):
         if self.val_size == 1:
             return [], files, []
 
-        # take subsample of DataFrame comprised by given files
+        # take subsample of DataFrame comprised by given patient files
+        patient_files = [fs for fs in files if 'Controls' not in str(fs[0])]
         df = pd.read_csv(self.root / 'Sophie overview 2.0.csv')
-        idxs = [int(fs[0].parent.stem) - 1 for fs in files]
+        idxs = [int(fs[0].parent.stem) - 1 for fs in patient_files]
         df = df.iloc[idxs].reset_index()
 
         # make one-hot vectors about fracture region and displacement
@@ -127,8 +129,8 @@ class JawFracDataModule(VolumeDataModule):
         )
         train_idxs, val_test_idxs = next(splitter.split(one_hots, one_hots))
 
-        train_files = [files[i] for i in train_idxs]
-        val_test_files = [files[i] for i in val_test_idxs]
+        train_files = [patient_files[i] for i in train_idxs]
+        val_test_files = [patient_files[i] for i in val_test_idxs]
         one_hots = one_hots[val_test_idxs]
 
         # return if there should not be validation or test files
@@ -148,6 +150,22 @@ class JawFracDataModule(VolumeDataModule):
 
         val_files = [val_test_files[i] for i in val_idxs]
         test_files = [val_test_files[i] for i in test_idxs]
+
+        control_files = [fs for fs in files if 'Controls' in str(fs[0])]
+        if not control_files:
+            return train_files, val_files, test_files
+
+        # randomly split control files among validation and test splits
+        splitter = ShuffleSplit(
+            n_splits=1,
+            test_size=len(test_files),
+            train_size=len(val_files),
+            random_state=self.seed,
+        )
+        val_idxs, test_idxs = next(splitter.split(control_files))
+
+        val_files += [control_files[i] for i in val_idxs]
+        test_files += [control_files[i] for i in test_idxs]
 
         return train_files, val_files, test_files
 
@@ -247,6 +265,8 @@ class JawFracDataModule(VolumeDataModule):
             return features, masks
         
         classes = torch.cat(batch_dict['classes'])
+
+        # do not provide segmentation feedback for displaced patches
         masks[classes == 2] = -1
 
         classes = self.class_label_to_idx[classes]

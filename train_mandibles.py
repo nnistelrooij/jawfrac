@@ -38,7 +38,7 @@ def train():
         filename='weights-{epoch:02d}',
     )
     loss_checkpoint_callback = ModelCheckpoint(
-        save_top_k=10,
+        save_top_k=3,
         monitor='loss/val',
         filename='weights-{epoch:02d}',
     )
@@ -55,7 +55,7 @@ def train():
         devices=1,
         max_epochs=config['model']['epochs'],
         logger=logger,
-        # accumulate_grad_batches=4,
+        accumulate_grad_batches=config['accumulate_grad_batches'],
         gradient_clip_val=35,
         callbacks=[
             epoch_checkpoint_callback,

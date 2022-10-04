@@ -693,9 +693,9 @@ class RandomGammaAdjust:
     ) -> Dict[str, Any]:
         gamma = self.low + self.range * self.rng.random()
 
-        intensities = (intensities + 1024) / 4095
+        intensities = (intensities + 1024) / 4120
         intensities = intensities ** gamma
-        intensities = (intensities * 4095) - 1024
+        intensities = (intensities * 4120) - 1024
 
         data_dict['intensities'] = intensities
 

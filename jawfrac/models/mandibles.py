@@ -29,8 +29,7 @@ def filter_connected_components(
     conf_thresh: float=0.5,
 ) -> TensorType['D', 'H', 'W', torch.bool]:
     # determine connected components in volume
-    probs = torch.sigmoid(seg)
-    labels = (probs >= conf_thresh).long()
+    labels = (seg >= conf_thresh).long()
     component_idxs, _ = ndimage.label(
         input=labels.cpu(),
         structure=ndimage.generate_binary_structure(3, 1),
@@ -45,7 +44,7 @@ def filter_connected_components(
 
     # determine components with mean confidence at least 0.70
     component_probs = scatter_mean(
-        src=probs.flatten(),
+        src=seg.flatten(),
         index=component_idxs.flatten(),
     )
     prob_mask = component_probs >= 0.6
@@ -168,7 +167,7 @@ class MandibleSegModule(pl.LightningModule):
             seg, patch_idxs, features.shape[1:],
         )
         
-        return coords, seg
+        return coords, torch.sigmoid(seg)
 
     def test_step(
         self,

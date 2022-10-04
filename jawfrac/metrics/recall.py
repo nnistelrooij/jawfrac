@@ -38,6 +38,22 @@ class FracRecall(Metric):
         
         return out
 
+    def compute_iou(
+        self,
+        pred: TensorType['N', 3, torch.int64],
+        target: TensorType['N', 3, torch.int64],
+    ) -> float:
+        start_idxs = torch.maximum(pred.amin(dim=0), target.amin(dim=0))
+        stop_idxs = torch.minimum(pred.amax(dim=0), target.amax(dim=0))
+
+        intersection = (stop_idxs - start_idxs + 1).clip(0, None)
+        intersection = torch.prod(intersection)
+        
+        pred_volume = torch.prod(pred.amax(dim=0) - pred.amin(dim=0) + 1)
+        target_volume = torch.prod(target.amax(dim=0) - target.amin(dim=0) + 1)
+
+        return intersection / (pred_volume + target_volume - intersection)
+
     def compute_ious(
         self,
         pred: List[TensorType['N', 3, torch.int64]],
@@ -46,13 +62,7 @@ class FracRecall(Metric):
         ious = torch.empty(len(pred), len(target))
         for i in range(len(pred)):
             for j in range(len(target)):
-                voxel_idxs = torch.cat((pred[i], target[j]))
-                unique, counts = torch.unique(
-                    voxel_idxs, return_counts=True, dim=0,
-                )
-                iou = (counts == 2).sum() / unique.shape[0]
-
-                ious[i, j] = iou
+                ious[i, j] = self.compute_iou(pred[i], target[j])
         
         return ious
 

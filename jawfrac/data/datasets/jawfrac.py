@@ -34,6 +34,7 @@ class JawFracDataset(VolumeDataset):
                 T.ExpandLabel(**expand_label),
                 T.NegativeIndices(),
             ) if stage == 'fit' else ()),
+            T.ExpandLabel(**expand_label) if stage == 'test' else dict,
         )
 
         super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)
@@ -52,7 +53,7 @@ class JawFracDataset(VolumeDataset):
             intensities = (intensities - center) / 255 * 4095
 
         # clip intensities to sensible range
-        intensities = intensities.clip(-1024, 3071)
+        intensities = intensities.clip(-1024, 3096)
 
         seg = nibabel.load(self.root / mandible_file)
         mask = np.asarray(seg.dataobj) == 1

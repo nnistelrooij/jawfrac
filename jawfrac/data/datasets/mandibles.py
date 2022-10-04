@@ -25,9 +25,11 @@ class MandibleSegDataset(VolumeDataset):
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
             T.PatchIndices(patch_size=patch_size, stride=stride),
-            T.BonePatchIndices(),
-            T.PositiveNegativeIndices() if stage == 'fit' else dict,
-            T.MandibleStatistics(),
+            *((
+                T.BonePatchIndices(),
+                T.PositiveNegativeIndices(),
+                T.MandibleStatistics(),
+            ) if stage == 'fit' else ()),
         )
 
         super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)
@@ -45,7 +47,7 @@ class MandibleSegDataset(VolumeDataset):
             intensities = (intensities - center) / 255 * 4095
 
         # clip intensities to sensible range
-        intensities = intensities.clip(-1024, 3071)
+        intensities = intensities.clip(-1024, 3096)
 
         print(file.parent.stem)
 
