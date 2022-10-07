@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import pytorch_lightning as pl
 from scipy import ndimage
@@ -88,6 +88,7 @@ class LinearJawFracModule(pl.LightningModule):
         weight_decay: float,
         first_stage: Dict[str, Any],
         second_stage: Dict[str, Any],
+        third_stage: Dict[str, Any],
         focal_loss: bool,
         dice_loss: bool,
         conf_threshold: float,
@@ -102,7 +103,7 @@ class LinearJawFracModule(pl.LightningModule):
         self.frac_net = nn.JawFracNet(
             num_classes=1,
             mandible_channels=self.mandible_net.out_channels,
-            coords=second_stage['coords'],
+            **second_stage,
             **model_cfg,
         )
 
@@ -111,7 +112,7 @@ class LinearJawFracModule(pl.LightningModule):
         self.confmat = ConfusionMatrix(num_classes=2)
         self.f1 = F1Score(num_classes=2, average='macro')
         self.precision_metric = FracPrecision()
-        self.recall = FracRecall()
+        self.recall_metric = FracRecall()
 
         self.lr = lr
         self.epochs = epochs
@@ -123,7 +124,13 @@ class LinearJawFracModule(pl.LightningModule):
     def forward(
         self,
         x: TensorType['P', 1, 'size', 'size', 'size', torch.float32],       
-    ) -> TensorType['P', 'size', 'size', 'size', torch.float32]:
+    ) -> Union[
+        TensorType['B', 'D', 'H', 'W', torch.float32],
+        Tuple[
+            TensorType['B', 'D', 'H', 'W', torch.float32],
+            TensorType['B', 'D', 'H', 'W', torch.float32],
+        ],
+    ]:
         coords, mandible = self.mandible_net(x)
         seg = self.frac_net(x, coords, mandible)
 
@@ -160,6 +167,10 @@ class LinearJawFracModule(pl.LightningModule):
         x = self(x)
 
         loss = self.criterion(x, y)
+
+        if isinstance(x, tuple):
+            x = x[1]
+
         x = torch.sigmoid(x) >= self.conf_thresh
         self.f1(
             x[y != -1].long(),
@@ -209,12 +220,12 @@ class LinearJawFracModule(pl.LightningModule):
         )
         self.f1(mask.long().flatten(), target.long().flatten())
         self.precision_metric(mask, target)
-        self.recall(mask, target)
+        self.recall_metric(mask, target)
         
         # log metrics
         self.log('f1/test', self.f1)
         self.log('precision/test', self.precision_metric)
-        self.log('recall/test', self.recall)
+        self.log('recall/test', self.recall_metric)
         
         # visualize results with Open3D
         draw_fracture_result(mandible, mask, labels >= self.conf_thresh)
@@ -256,7 +267,7 @@ class LinearJawFracModule(pl.LightningModule):
         )
 
         non_warmup_epochs = self.epochs - self.warmup_epochs
-        sch = CosineAnnealingLR(opt, T_max=non_warmup_epochs, min_lr_ratio=0.01)
-        sch = LinearWarmupLR(sch, self.warmup_epochs, init_lr_ratio=0.0001)
+        sch = CosineAnnealingLR(opt, T_max=non_warmup_epochs, min_lr_ratio=0.00)
+        sch = LinearWarmupLR(sch, self.warmup_epochs, init_lr_ratio=0.001)
 
         return [opt], [sch]

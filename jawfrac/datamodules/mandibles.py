@@ -19,6 +19,7 @@ class MandibleSegDataModule(VolumeDataModule):
         self,
         root: Union[str, Path],
         patch_size: int,
+        gamma_adjust: bool,
         max_patches_per_scan: int,
         ignore_outside: bool,
         **dm_cfg: Dict[str, Any],
@@ -41,6 +42,7 @@ class MandibleSegDataModule(VolumeDataModule):
         )
 
         self.patch_size = patch_size
+        self.gamma_adjust = gamma_adjust
         self.max_patches_per_scan = max_patches_per_scan
         self.ignore_outside = ignore_outside
 
@@ -87,6 +89,7 @@ class MandibleSegDataModule(VolumeDataModule):
                 T.RandomXAxisFlip(rng=rng),
                 T.RandomPatchTranslate(max_voxels=16, rng=rng),
                 val_transforms,
+                T.RandomGammaAdjust(rng=rng) if self.gamma_adjust else dict,
             )
 
             self.train_dataset = MandibleSegDataset(
@@ -115,7 +118,7 @@ class MandibleSegDataModule(VolumeDataModule):
 
         if stage is None or stage == 'predict':
             files = self._files('predict')
-            files = [f for f in files if not (self.root / f[0].parent / 'mandible2.nii.gz').exists()]
+            # files = [f for f in files if not (self.root / f[0].parent / 'mandible3.nii.gz').exists()]
 
             self.predict_dataset = MandibleSegDataset(
                 stage='predict',

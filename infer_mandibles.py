@@ -19,11 +19,10 @@ def infer():
     )
 
     model = MandibleSegModule.load_from_checkpoint(
-        'checkpoints/mandibles_positions_size=0.4.ckpt',
+        'checkpoints/mandibles.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )
-    torch.save(model.model.unet.state_dict(), 'checkpoints/unet.ckpt')
 
     trainer = pl.Trainer(
         accelerator='gpu',
@@ -41,7 +40,7 @@ def infer():
         # save to storage
         volume = volume.cpu().numpy().astype(np.uint16)
         img = nibabel.Nifti1Image(volume, affine)
-        nibabel.save(img, path.parent / 'mandible2.nii.gz')
+        nibabel.save(img, path.parent / 'mandible3.nii.gz')
 
 
 if __name__ == '__main__':

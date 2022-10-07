@@ -50,7 +50,7 @@ def train():
     metric_checkpoint_callback = ModelCheckpoint(
         save_top_k=10,
         monitor=(
-            'f1/val_masks2'
+            'f1/val_classes'
             if isinstance(model, LinearDisplacedJawFracModule) else
             'f1/val'
         ),
@@ -63,7 +63,7 @@ def train():
         devices=1,
         max_epochs=config['model']['epochs'],
         logger=logger,
-        # accumulate_grad_batches=4,
+        accumulate_grad_batches=config['accumulate_grad_batches'],
         gradient_clip_val=35,
         callbacks=[
             epoch_checkpoint_callback,

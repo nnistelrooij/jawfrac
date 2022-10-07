@@ -1,10 +1,11 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 from torchtyping import TensorType
 
 from jawfrac.nn.modules.convnet import ConvTransposeBlock
+from jawfrac.nn.modules.gapm import GrayscaleAdaptivePerceptionModule
 from jawfrac.nn.modules.swin_unetr import SwinUNETRBackbone
 from jawfrac.nn.modules.unet import Decoder, Encoder
 
@@ -19,40 +20,74 @@ class JawFracNet(nn.Module):
         channels_list: List[int],
         backbone: str,
         coords: Optional[str],
+        head_kernel_size: int,
+        cascade: bool,
+        return_features: bool=False,
         checkpoint_path: str='',
     ) -> None:
         super().__init__()
 
-        assert coords != 'sparse' or backbone == 'conv', (
+        assert backbone == 'conv' or 'sparse' not in coords, (
             'Cannot combine swin backbone with sparse coordinates.'
         )
 
+        self.gapm = GrayscaleAdaptivePerceptionModule(num_awms)
+        
+        in_channels = 1 + num_awms + mandible_channels + 3 * ('dense' in coords)
+
         if backbone == 'conv':
-            self.encoder = Encoder(
-                in_channels=1 + mandible_channels + 3 * ('dense' in coords),
+            self.encoder1 = Encoder(
+                in_channels=in_channels,
                 channels_list=channels_list,
             )
-            self.decoder = Decoder(
+            channels_list[-1] += 3 * ('sparse' in coords)
+            self.decoder1 = Decoder(
                 num_classes=1,
-                channels_list=[128 + 3 * ('sparse' in coords), 64, 32, 16],
+                channels_list=channels_list[::-1],
             )
+            if cascade:
+                channels_list[-1] -= 3 * ('sparse' in coords)
+                self.encoder2 = Encoder(
+                    in_channels=in_channels + 1,
+                    channels_list=channels_list,
+                )
+                channels_list[-1] += 3 * ('sparse' in coords)
+                self.decoder2 = Decoder(
+                    num_classes=1,
+                    channels_list=channels_list[::-1],
+                )
         elif backbone == 'swin':
-            self.unet = SwinUNETRBackbone(
+            self.unet1 = SwinUNETRBackbone(
                 img_size=64,
-                in_channels=1 + mandible_channels + 3 * ('dense' in coords),
+                in_channels=in_channels,
                 out_channels=1,
             )
+            if cascade:
+                self.unet2 = SwinUNETRBackbone(
+                    img_size=64,
+                    in_channels=in_channels + 1,
+                    out_channels=1,
+                )
         else:
             raise ValueError(f'Backbone not recognized: {backbone}.')
 
         if 'dynamic' in coords and 'sparse' in coords:
             self.init_sparse_coords()
 
-        self.head = nn.Conv3d(
-            in_channels=32 - 8 * (backbone == 'swin'),
+        latent_features = channels_list[1] if backbone == 'conv' else 24
+        self.head1 = nn.Conv3d(
+            in_channels=latent_features,
             out_channels=1,
-            kernel_size=1,
+            kernel_size=head_kernel_size,
+            padding=head_kernel_size // 2,
         )
+        if cascade:
+            self.head2 = nn.Conv3d(
+                in_channels=latent_features,
+                out_channels=1,
+                kernel_size=head_kernel_size,
+                padding=head_kernel_size // 2,
+            )
 
         if checkpoint_path:
             state_dict = torch.load(checkpoint_path)['state_dict']
@@ -63,6 +98,9 @@ class JawFracNet(nn.Module):
 
         self.backbone = backbone
         self.coords = coords
+        self.cascade = cascade
+        self.return_features = return_features
+        self.out_channels = 1 + return_features * latent_features
 
     def init_sparse_coords(self):
         self.coords_linear = nn.Sequential(
@@ -88,41 +126,71 @@ class JawFracNet(nn.Module):
         x: TensorType['B', 1, 'D', 'H', 'W', torch.float32],
         coords: TensorType['B', 3, torch.float32],
         mandible: TensorType['B', '[C]', 'D', 'H', 'W', torch.float32],
-    ) -> TensorType['B', 'D', 'H', 'W', torch.float32]:
+    ) -> Union[
+        TensorType['B', '[C]', 'D', 'H', 'W', torch.float32],
+        Tuple[
+            TensorType['B', 'D', 'H', 'W', torch.float32],
+            TensorType['B', 'D', 'H', 'W', torch.float32],
+        ],
+    ]:
+        x = self.gapm(x)
+
         mandible = mandible.reshape(x.shape[:1] + (-1,) + x.shape[2:])
         x = torch.cat((x, mandible), dim=1)
 
-        if 'dynamic' in self.coords and 'dense' in self.coords:
-            voxel_coords = torch.linspace(-0.4, 0.4, steps=x.shape[-1])
-            voxel_coords = torch.cartesian_prod(*voxel_coords.tile(3, 1))
-            voxel_coords = voxel_coords.reshape(1, *x.shape[2:], 3).to(coords)
-            voxel_coords = voxel_coords + coords.reshape(-1, 1, 1, 1, 3)
-            voxel_coords[..., 0] = torch.abs(voxel_coords[..., 0])  # left-right symmetry
-            voxel_coords = voxel_coords.permute(0, 4, 1, 2, 3)
-            x = torch.cat((x, voxel_coords), dim=1)
-        elif 'dense' in self.coords:
-            voxel_coords = coords.tile(*x.shape[2:], 1, 1)
+        if 'dense' in self.coords:
+            if 'dynamic' in self.coords:
+                voxel_coords = torch.linspace(-0.15, 0.15, steps=x.shape[-1])
+                voxel_coords = torch.cartesian_prod(*voxel_coords.tile(3, 1))
+                voxel_coords = voxel_coords.reshape(*x.shape[2:], 1, 3)
+                voxel_coords = voxel_coords.to(coords) + coords
+                voxel_coords[..., 0] = torch.abs(voxel_coords[..., 0])  # left-right symmetry
+            else:
+                voxel_coords = coords.tile(*x.shape[2:], 1, 1)
+            
             voxel_coords = voxel_coords.permute(3, 4, 0, 1, 2)
             x = torch.cat((x, voxel_coords), dim=1)
 
         if self.backbone == 'conv':
-            xs = self.encoder(x)
+            xs = self.encoder1(x)
 
-        if 'dynamic' in self.coords and 'sparse' in self.coords:
-            coords = self.coords_linear(coords)
-            coords = coords.reshape(-1, 3, 2, 2, 2)
-            coords = self.coords_conv(coords)
-            xs[0] = torch.cat((xs[0], coords), dim=1)
-        elif 'sparse' in self.coords:
-            voxel_coords = coords.tile(*xs[0].shape[2:], 1, 1)
-            voxel_coords = voxel_coords.permute(3, 4, 0, 1, 2)
+        if 'sparse' in self.coords:
+            if 'dynamic' in self.coords:
+                coords = self.coords_linear(coords)
+                voxel_coords = coords.reshape(-1, 3, 2, 2, 2)
+                voxel_coords = self.coords_conv(voxel_coords)
+            else:
+                voxel_coords = coords.tile(*xs[0].shape[2:], 1, 1)
+                voxel_coords = voxel_coords.permute(3, 4, 0, 1, 2)
+
             xs[0] = torch.cat((xs[0], voxel_coords), dim=1)
 
         if self.backbone == 'conv':
-            x = self.decoder(xs)
+            features = self.decoder1(xs)
         elif self.backbone == 'swin':
-            _, x = self.unet(x)
+            _, features = self.unet1(x)
 
-        x = self.head(x)
+        masks1 = self.head1(features)
 
-        return x.squeeze(dim=1)
+        if not self.cascade:
+            if self.return_features:
+                return torch.cat((masks1, features), dim=1)
+            else:
+                return masks1.squeeze(dim=1)
+
+        x = torch.cat((x, masks1), dim=1)
+
+        if self.backbone == 'conv':
+            xs = self.encoder2(x)
+            if 'sparse' in self.coords:
+                xs[0] = torch.cat((xs[0], voxel_coords), dim=1)
+            features = self.decoder2(xs)
+        elif self.backbone == 'swin':
+            _, features = self.unet2(x)
+
+        masks2 = self.head2(features)
+
+        if self.return_features:
+            return torch.cat((masks2, features), dim=1)
+        else:
+            return masks1.squeeze(dim=1), masks2.squeeze(dim=1)

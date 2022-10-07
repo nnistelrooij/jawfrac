@@ -10,11 +10,9 @@ class AdaptiveWindowingModule(nn.Module):
         out_channels: int,
         init_level: float,
         init_width: float,
+        eps: float=1e-6,
     ) -> None:
         super().__init__()
-
-        self.min = init_level - init_width / 2
-        self.max = init_level + init_width / 2
 
         self.conv1 = nn.Conv3d(
             in_channels=1,
@@ -31,6 +29,10 @@ class AdaptiveWindowingModule(nn.Module):
             out_channels=1,
             kernel_size=1,
         )
+
+        self.min = init_level - init_width / 2
+        self.max = init_level + init_width / 2
+        self.eps = eps
 
     def forward(
         self,
@@ -55,7 +57,7 @@ class AdaptiveWindowingModule(nn.Module):
 
         # apply windowing to get intensities between -1 and 1
         x = x.clip(pred_min, pred_max)
-        x = (x - pred_min) / (pred_max - pred_min + 1e-6)
+        x = (x - pred_min) / (pred_max - pred_min + self.eps)
         x = (x * 2) - 1
 
         return x
@@ -67,8 +69,8 @@ class GrayscaleAdaptivePerceptionModule(nn.Module):
         self,
         num_awms: int=3,
         awm_channels: int=16,
-        init_level: float=1036.0,  # 40.5,
-        init_width: float=4120.0,  # 350.0,
+        init_level: float=1036.0,
+        init_width: float=4120.0,
     ) -> None:
         super().__init__()
 

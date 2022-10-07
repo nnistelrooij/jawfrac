@@ -228,7 +228,7 @@ class MandibleSegModule(pl.LightningModule):
         )
 
         non_warmup_epochs = self.epochs - self.warmup_epochs
-        sch = CosineAnnealingLR(opt, T_max=non_warmup_epochs, min_lr_ratio=0.01)
-        sch = LinearWarmupLR(sch, self.warmup_epochs, init_lr_ratio=0.0001)
+        sch = CosineAnnealingLR(opt, T_max=non_warmup_epochs, min_lr_ratio=0.0)
+        sch = LinearWarmupLR(sch, self.warmup_epochs, init_lr_ratio=0.001)
 
         return [opt], [sch]

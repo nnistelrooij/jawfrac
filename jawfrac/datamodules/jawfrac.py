@@ -187,11 +187,11 @@ class JawFracDataModule(VolumeDataModule):
             )
             train_transforms = T.Compose(
                 T.RandomXAxisFlip(rng=rng),
-                T.RandomGammaAdjust(rng=rng) if self.gamma_adjust else dict,
                 T.RandomPatchTranslate(
                     max_voxels=self.patch_size // 4, rng=rng,
                 ),
                 val_transforms,
+                T.RandomGammaAdjust(rng=rng) if self.gamma_adjust else dict,
             )
 
             self.train_dataset = JawFracDataset(

@@ -441,7 +441,7 @@ class LinearFracturePatchIndices:
         )
         patch_idxs += diff[..., np.newaxis]
 
-        # update or set new patch indices and labels
+        # update or set new patch indices and classes
         patch_classes = np.full(patch_idxs.shape[0], self.fg_label)
         if 'patch_idxs' in data_dict:
             data_dict['patch_idxs'] = np.concatenate(
@@ -688,16 +688,16 @@ class RandomGammaAdjust:
 
     def __call__(
         self,
-        intensities: NDArray[Any],
+        features: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
         gamma = self.low + self.range * self.rng.random()
 
-        intensities = (intensities + 1024) / 4120
-        intensities = intensities ** gamma
-        intensities = (intensities * 4120) - 1024
+        features = (features + 1024) / 4120
+        features = features ** gamma
+        features = (features * 4120) - 1024
 
-        data_dict['intensities'] = intensities
+        data_dict['features'] = features
 
         return data_dict
 

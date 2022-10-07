@@ -3,21 +3,31 @@ version: 33
 seed: 0
 
 model:
-  channels_list: [16, 32, 64, 128]
   lr: 0.01
   epochs: 500
   warmup_epochs: 20
   weight_decay: 0.0
-  num_awms: 0
-  backbone: 'conv'
   first_stage:
-    checkpoint_path: 'checkpoints/mandibles_positions_size=0.4.ckpt'
+    num_awms: 3
+    backbone: 'conv'
+    channels_list: [16, 32, 64, 128]
+    checkpoint_path: 'checkpoints/mandibles.ckpt'
     return_features: False
-    head_kernel_size: 3
+    head_kernel_size: 1
   second_stage:
+    num_awms: 0
     coords: ''
+    backbone: 'conv'
+    channels_list: [32, 64, 128, 256]
+    head_kernel_size: 3
+    cascade: True
     checkpoint_path: ''  # 'checkpoints/fractures_linear2.ckpt'
-  focal_loss: True
+  third_stage:
+    num_awms: 0
+    coords: ''
+    backbone: 'conv'
+    channels_list: [16, 32, 64, 128]
+  focal_loss: False
   dice_loss: False
   conf_threshold: 0.2
   min_component_size: 2048
@@ -27,10 +37,10 @@ datamodule:
   # root: '/mnt/diag/nielsvannistelrooij/fractures'
   regex_filter: 'Annotation UK'
   linear: True
-  displacements: True
+  displacements: False
   val_size: 0.2
   test_size: 0.2
-  batch_size: 4
+  batch_size: 1
   num_workers: 1
   pin_memory: True
   persistent_workers: True
@@ -49,3 +59,5 @@ datamodule:
   max_patches_per_scan: 4
   class_label_to_idx: [0, 1, 1]
   ignore_outside: False
+
+accumulate_grad_batches: 4

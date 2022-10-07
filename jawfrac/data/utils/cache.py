@@ -30,13 +30,11 @@ class DatasetCache(dict):
         self.disable = disable
 
     def __setitem__(self, key: int, value: Any) -> None:
-        if self.disable:
-            return
-
         super().__setitem__(key, copy.deepcopy(value))
 
         if (
-            not self.cache_path.exists()
+            not self.disable
+            and not self.cache_path.exists()
             and len(self) == len(self.dataset)
         ):
             print(f'Storing dataset as {self.cache_path}.')

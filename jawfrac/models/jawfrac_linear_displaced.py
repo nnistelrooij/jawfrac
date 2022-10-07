@@ -36,6 +36,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         weight_decay: float,
         first_stage: Dict[str, Any],
         second_stage: Dict[str, Any],
+        third_stage: Dict[str, Any],
         focal_loss: bool,
         dice_loss: bool,
         conf_threshold: float,
@@ -57,18 +58,24 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.frac_cascade_net = nn.JawFracCascadeNet(
             num_classes=num_classes,
             mandible_channels=self.mandible_net.out_channels,
+            fracture_channels=self.frac_net.out_channels,
+            **{k: v for k, v in third_stage.items() if 'only_class' not in k},
             **model_cfg,
         )
 
         # initialize loss function
-        self.criterion = nn.JawFracLoss(num_classes, focal_loss, dice_loss)
+        self.criterion = nn.JawFracLoss(
+            num_classes,
+            focal_loss,
+            dice_loss,
+            only_classification=True,
+        )
 
         self.confmat = ConfusionMatrix(num_classes=2)
-        self.f1_1 = F1Score(num_classes=num_classes, average='macro')
+        self.f1_1 = F1Score(num_classes=2, average='macro')
         self.f1_2 = F1Score(num_classes=2, average='macro')
-        self.f1_3 = F1Score(num_classes=2, average='macro')
         self.precision_metric = FracPrecision()
-        self.recall = FracRecall()
+        self.recall_metric = FracRecall()
 
         self.num_classes = max(2, num_classes)
         self.lr = lr
@@ -84,13 +91,12 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
     ) -> Tuple[
         TensorType['B', 'D', 'H', 'W', torch.float32],
         TensorType['B', torch.float32],
-        TensorType['B', 'D', 'H', 'W', torch.float32],
     ]:
         coords, mandible = self.mandible_net(x)
-        masks1 = self.frac_net(x, coords, mandible)
-        logits, masks2 = self.frac_cascade_net(x, mandible, masks1)
+        masks = self.frac_net(x, coords, mandible)
+        logits = self.frac_cascade_net(x, coords, mandible, masks)
 
-        return masks1, logits, masks2
+        return masks, logits
 
     def training_step(
         self,
@@ -105,9 +111,9 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
     ) -> TensorType[torch.float32]:
         x, y = batch
 
-        masks1, logits, masks2 = self(x)
+        masks, logits = self(x)
 
-        loss, log_dict = self.criterion(masks1, logits, masks2, y)
+        loss, log_dict = self.criterion(masks, logits, y)
         self.log_dict({
             k.replace('/', '/train_' if k[-1] != '/' else '/train'): v
             for k, v in log_dict.items()
@@ -128,24 +134,22 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
     ) -> None:
         x, y = batch
 
-        masks1, logits, masks2 = self(x)
+        masks, logits = self(x)
 
         # losses
-        _, log_dict = self.criterion(masks1, logits, masks2, y)
+        _, log_dict = self.criterion(masks, logits, y)
 
         # classification metric
         if self.num_classes == 2:
             classes = (logits >= 0).long()
         else:
-            classes = logits.argmax(dim=1)
-        self.f1_1(classes, y[0])
+            classes = logits.argmax(dim=1).clip(0, 1)
+        self.f1_1(classes, (y[0] >= 1).long())
 
         # segmentation metrics
-        masks1 = torch.sigmoid(masks1) >= self.conf_thresh
-        masks2 = torch.sigmoid(masks2) >= self.conf_thresh
+        masks = torch.sigmoid(masks) >= self.conf_thresh
         target = y[1] >= self.conf_thresh
-        self.f1_2(masks1[y[1] != -1].long(), target[y[1] != -1].long())
-        self.f1_3(masks2[y[1] != -1].long(), target[y[1] != -1].long())
+        self.f1_2(masks[y[1] != -1].long(), target[y[1] != -1].long())
         
         # log metrics
         self.log_dict({
@@ -155,7 +159,6 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             },
             'f1/val_classes': self.f1_1,
             'f1/val_masks1': self.f1_2,
-            'f1/val_masks2': self.f1_3,
         })
 
     def predict_volumes(
@@ -167,7 +170,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         TensorType['D', 'H', 'W', torch.float32],
     ]:
         # perform model inference in batches
-        masks, logits, _ = batch_forward(self, features, patch_idxs)
+        masks, logits = batch_forward(self, features, patch_idxs)
 
         # aggregate predictions from multiple patches
         linear = aggregate_dense_predictions(
@@ -197,12 +200,6 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
 
         # filter connected components in each volume separately
         mask = (linear + displaced) / 2
-        linear = filter_connected_components(
-            mandible, linear, self.conf_thresh, self.min_component_size,
-        )
-        displaced = filter_connected_components(
-            mandible, displaced, 0.8, self.min_component_size,
-        )
         mask = filter_connected_components(
             mandible, mask, 0.5, self.min_component_size,
         )
@@ -213,16 +210,16 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             torch.any(target > 0)[None].long(),
         )
         self.f1_2(
-            linear.long().flatten(),
+            mask.long().flatten(),
             (target >= self.conf_thresh).long().flatten(),
         )
         self.precision_metric(mask, target > self.conf_thresh)
-        self.recall(mask, target > self.conf_thresh)
+        self.recall_metric(mask, target > self.conf_thresh)
         
         # log metrics
         self.log('f1/test', self.f1_2)
         self.log('precision/test', self.precision_metric)
-        self.log('recall/test', self.recall)
+        self.log('recall/test', self.recall_metric)
         
         draw_fracture_result(mandible, mask, target >= self.conf_thresh)
 
