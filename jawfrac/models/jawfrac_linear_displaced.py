@@ -37,8 +37,6 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         first_stage: Dict[str, Any],
         second_stage: Dict[str, Any],
         third_stage: Dict[str, Any],
-        focal_loss: bool,
-        dice_loss: bool,
         conf_threshold: float,
         min_component_size: int,
         **model_cfg: Dict[str, Any],
@@ -59,17 +57,12 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             num_classes=num_classes,
             mandible_channels=self.mandible_net.out_channels,
             fracture_channels=self.frac_net.out_channels,
-            **{k: v for k, v in third_stage.items() if 'only_class' not in k},
+            **third_stage,
             **model_cfg,
         )
 
         # initialize loss function
-        self.criterion = nn.JawFracLoss(
-            num_classes,
-            focal_loss,
-            dice_loss,
-            only_classification=True,
-        )
+        self.criterion = nn.JawFracLoss(num_classes)
 
         self.confmat = ConfusionMatrix(num_classes=2)
         self.f1_1 = F1Score(num_classes=2, average='macro')
@@ -94,7 +87,12 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
     ]:
         coords, mandible = self.mandible_net(x)
         masks = self.frac_net(x, coords, mandible)
+        if isinstance(masks, tuple):
+            masks = masks[1]
         logits = self.frac_cascade_net(x, coords, mandible, masks)
+
+        if masks.dim() == 5:
+            masks = masks[:, 0]
 
         return masks, logits
 
@@ -103,21 +101,18 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         batch: Tuple[
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
             Tuple[
-                TensorType['P', torch.bool],
                 TensorType['P', 'size', 'size', 'size', torch.bool],
+                TensorType['P', torch.bool],
             ],
         ],
         batch_idx: int,
     ) -> TensorType[torch.float32]:
         x, y = batch
 
-        masks, logits = self(x)
+        _, logits = self(x)
 
-        loss, log_dict = self.criterion(masks, logits, y)
-        self.log_dict({
-            k.replace('/', '/train_' if k[-1] != '/' else '/train'): v
-            for k, v in log_dict.items()
-        })
+        loss = self.criterion(logits, y)
+        self.log('loss/train', loss)
 
         return loss
 
@@ -126,8 +121,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         batch: Tuple[
             TensorType['P', 'C', 'size', 'size', 'size', torch.float32],
             Tuple[
-                TensorType['P', torch.int64],
                 TensorType['P', 'size', 'size', 'size', torch.float32],
+                TensorType['P', torch.int64],
             ],
         ],
         batch_idx: int,
@@ -137,28 +132,25 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         masks, logits = self(x)
 
         # losses
-        _, log_dict = self.criterion(masks, logits, y)
+        loss = self.criterion(logits, y)
 
         # classification metric
         if self.num_classes == 2:
             classes = (logits >= 0).long()
         else:
             classes = logits.argmax(dim=1).clip(0, 1)
-        self.f1_1(classes, (y[0] >= 1).long())
+        self.f1_1(classes, (y[1] >= 1).long())
 
         # segmentation metrics
         masks = torch.sigmoid(masks) >= self.conf_thresh
-        target = y[1] >= self.conf_thresh
-        self.f1_2(masks[y[1] != -1].long(), target[y[1] != -1].long())
+        target = y[0] >= self.conf_thresh
+        self.f1_2(masks[y[0] != -1].long(), target[y[0] != -1].long())
         
         # log metrics
         self.log_dict({
-            **{
-                k.replace('/', '/val_' if k[-1] != '/' else '/val'): v
-                for k, v in log_dict.items()
-            },
+            'loss/val': loss,
             'f1/val_classes': self.f1_1,
-            'f1/val_masks1': self.f1_2,
+            'f1/val_masks': self.f1_2,
         })
 
     def predict_volumes(
@@ -270,7 +262,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         )
 
         non_warmup_epochs = self.epochs - self.warmup_epochs
-        sch = CosineAnnealingLR(opt, T_max=non_warmup_epochs, min_lr_ratio=0.01)
-        sch = LinearWarmupLR(sch, self.warmup_epochs, init_lr_ratio=0.0001)
+        sch = CosineAnnealingLR(opt, T_max=non_warmup_epochs, min_lr_ratio=0.00)
+        sch = LinearWarmupLR(sch, self.warmup_epochs, init_lr_ratio=0.001)
 
         return [opt], [sch]

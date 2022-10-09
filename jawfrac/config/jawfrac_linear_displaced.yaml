@@ -1,0 +1,62 @@
+work_dir: '/home/mka3dlab/Documents/logs/fractures'
+version: 300
+seed: 0
+
+model:
+  lr: 0.002
+  epochs: 500
+  warmup_epochs: 20
+  weight_decay: 0.0
+  first_stage:
+    num_awms: 3
+    backbone: 'conv'
+    channels_list: [16, 32, 64, 128]
+    checkpoint_path: 'checkpoints/mandibles.ckpt'
+    head_kernel_size: 1
+    return_features: True
+  second_stage:
+    num_awms: 0
+    coords: ''
+    backbone: 'conv'
+    channels_list: [16, 32, 64, 128]
+    head_kernel_size: 1
+    return_features: False
+    cascade: True
+    checkpoint_path: 'checkpoints/fractures_linear.ckpt'
+  third_stage:
+    num_awms: 0
+    dropout: False
+    coords: ''
+    backbone: 'conv'
+    channels_list: [16, 32, 64, 128]
+  conf_threshold: 0.2
+  min_component_size: 2048
+
+datamodule:
+  root: '/home/mka3dlab/Documents/fractures'
+  # root: '/mnt/diag/nielsvannistelrooij/fractures'
+  regex_filter: 'Annotation UK'
+  val_size: 0.2
+  test_size: 0.2
+  batch_size: 1
+  num_workers: 1
+  pin_memory: True
+  persistent_workers: True
+  mandible_crop:
+    padding: 10.0  # mm
+    extend: True
+  regular_spacing: 0.4  # mm
+  haar_transform: False
+  patch_size: 96
+  stride: 48
+  expand_label:
+    bone_iters: 1
+    all_iters: 1
+    smooth: 0.5
+    negative_iters: 16
+  gamma_adjust: False
+  max_patches_per_scan: 4
+  class_label_to_idx: [0, 1, 1]
+  ignore_outside: True
+
+accumulate_grad_batches: 4

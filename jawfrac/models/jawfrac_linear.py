@@ -88,7 +88,6 @@ class LinearJawFracModule(pl.LightningModule):
         weight_decay: float,
         first_stage: Dict[str, Any],
         second_stage: Dict[str, Any],
-        third_stage: Dict[str, Any],
         focal_loss: bool,
         dice_loss: bool,
         conf_threshold: float,
@@ -187,9 +186,11 @@ class LinearJawFracModule(pl.LightningModule):
     ) -> TensorType['D', 'H', 'W', torch.float32]:
         # do model processing in batches
         seg = batch_forward(self, features, patch_idxs)
+        if isinstance(seg, tuple):
+            seg = seg[1]
         seg = torch.sigmoid(seg)
 
-        # aggregate predictions of voxel predictions in multiple patches
+        # aggregate predictions of voxels in multiple patches
         seg = aggregate_dense_predictions(seg, patch_idxs, features.shape[1:])
 
         return seg
@@ -228,7 +229,7 @@ class LinearJawFracModule(pl.LightningModule):
         self.log('recall/test', self.recall_metric)
         
         # visualize results with Open3D
-        draw_fracture_result(mandible, mask, labels >= self.conf_thresh)
+        # draw_fracture_result(mandible, mask, labels >= self.conf_thresh)
 
     def test_epoch_end(self, _) -> None:
         draw_confusion_matrix(self.confmat)

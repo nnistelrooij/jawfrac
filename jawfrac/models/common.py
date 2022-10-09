@@ -10,7 +10,8 @@ def batch_forward(
     model: torch.nn.Module,
     features: TensorType['C', 'D', 'H', 'W', torch.float32],
     patch_idxs: TensorType['P', 3, 2, torch.int64],
-    batch_size: int=24,
+    x_axis_flip: bool=True,
+    batch_size: int=12,
 ):
     # convert patch indices to patch slices
     patch_slices = []
@@ -18,7 +19,8 @@ def batch_forward(
         slices = tuple(slice(start, stop) for start, stop in patch_idxs)
         patch_slices.append(slices)
 
-    out = []
+    batches = []
+    batch_size //= 1 + x_axis_flip
     for i in range(0, len(patch_slices), batch_size):
         # extract batch of patches from features volume
         x = []
@@ -26,16 +28,29 @@ def batch_forward(
             slices = (slice(None),) + slices
             patch = features[slices]
             x.append(patch)
+            if x_axis_flip: x.append(patch.fliplr())
 
         # predict relative position and segmentation of patches
         x = torch.stack(x)
-        pred = model(x)
-        out.append(pred)
+        batch = model(x)
+        batches.append(batch)
 
-    if isinstance(out[0], torch.Tensor):
-        return torch.cat(out)
-    else:
-        return tuple(map(lambda ts: torch.cat(ts), zip(*out)))
+    # get tuple of concatenated output batches
+    if isinstance(batches[0], torch.Tensor):
+        batches = (batches,)
+    out = tuple(torch.cat(batches) for batches in zip(*batches))
+
+    # return simplest data structure
+    if not x_axis_flip:
+        return out[0] if len(out) == 1 else out
+
+    # take maximum of predictions from same patches
+    for i, batches in enumerate(out):
+        preds = torch.maximum(batches[::2], batches[1::2].fliplr())
+        out = out[:i] + (preds,) + out[i + 1:]
+
+    # return simplest data structure
+    return out[0] if len(out) == 1 else out
 
 
 def patches_subgrid(

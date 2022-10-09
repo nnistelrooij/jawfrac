@@ -4,27 +4,26 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import yaml
 
 from jawfrac.datamodules import JawFracDataModule
-from jawfrac.models import LinearJawFracModule, LinearDisplacedJawFracModule
+from jawfrac.models import LinearJawFracModule
 
 
 def train():
-    with open('jawfrac/config/jawfrac.yaml', 'r') as f:
+    with open('jawfrac/config/jawfrac_linear.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     pl.seed_everything(config['seed'], workers=True)
 
     dm = JawFracDataModule(
-        seed=config['seed'], **config['datamodule'],
+        linear=True,
+        displacements=True,
+        seed=config['seed'],
+        **config['datamodule'],
     )
 
     model = LinearJawFracModule(
         num_classes=dm.num_classes,
         **config['model'],
     )
-    # model = LinearDisplacedJawFracModule(
-    #     num_classes=dm.num_classes,
-    #     **config['model'],
-    # )
 
 
     logger = TensorBoardLogger(
@@ -49,11 +48,8 @@ def train():
     )
     metric_checkpoint_callback = ModelCheckpoint(
         save_top_k=10,
-        monitor=(
-            'f1/val_classes'
-            if isinstance(model, LinearDisplacedJawFracModule) else
-            'f1/val'
-        ),
+        monitor='f1/val',
+        mode='max',
         filename='weights-{epoch:02d}',
     )
 

@@ -17,6 +17,7 @@ class JawFracDataset(VolumeDataset):
         stage: str,
         mandible_crop: Dict[str, Union[bool, float]],
         regular_spacing: float,
+        haar_transform: bool,
         patch_size: int,
         stride: int,
         expand_label: Dict[str, int],
@@ -26,6 +27,7 @@ class JawFracDataset(VolumeDataset):
             T.MandibleCrop(**mandible_crop),
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
+            *((T.HaarTransform(),) if haar_transform else ()),
             T.PatchIndices(patch_size=patch_size, stride=stride),
             *((
                 T.BonePatchIndices(),

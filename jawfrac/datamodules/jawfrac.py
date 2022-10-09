@@ -251,8 +251,8 @@ class JawFracDataModule(VolumeDataModule):
         Union[
             TensorType['P', 'size', 'size', 'size', torch.float32],
             Tuple[
-                TensorType['P', torch.int64],
                 TensorType['P', 'size', 'size', 'size', torch.float32],
+                TensorType['P', torch.int64],
             ],
         ],
     ]:
@@ -271,7 +271,7 @@ class JawFracDataModule(VolumeDataModule):
 
         classes = self.class_label_to_idx[classes]
 
-        return features, (classes, masks)
+        return features, (masks, classes)
 
     def test_collate_fn(
         self,

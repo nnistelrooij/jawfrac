@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import nibabel
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+import pywt
 from scipy import ndimage
 from sklearn.cluster import DBSCAN
 import torch
@@ -754,6 +755,79 @@ class RandomPatchTranslate:
             f'    max_voxels={self.max},',
             ')',
         ])
+
+
+class HaarTransform:
+
+    def denoise(
+        self,
+        intensities,
+    ) -> NDArray[Any]:
+        coeffs_1 = pywt.dwtn(intensities, 'sym4')
+        for k_1 in coeffs_1.copy():
+            # do not change approximation
+            if 'd' not in k_1:
+                coeffs_2 = pywt.dwtn(coeffs_1[k_1], 'haar')
+                coeffs_1[k_1] = pywt.idwtn(coeffs_2, 'haar')
+
+                continue
+
+            coeffs_2 = pywt.dwtn(coeffs_1[k_1], 'haar')
+            for k_2, coeffs in coeffs_2.copy().items():
+                T = np.std(coeffs) * np.sqrt(2 * np.log(coeffs.size))
+
+                G = np.zeros_like(coeffs)
+                G[coeffs >= T] = coeffs[coeffs >= T] - T
+                G[coeffs <= -T] = coeffs[coeffs <= -T] + T
+
+                coeffs_2[k_2] = G
+
+            coeffs_1[k_1] = pywt.idwtn(coeffs_2, 'haar')
+
+        # get ouptut with same shape as input
+        out = pywt.idwtn(coeffs_1, 'sym4')
+        out = out[tuple(slice(None, dim) for dim in intensities.shape)]        
+
+        return out
+
+    def edge_detection(
+        self,
+        intensities: NDArray[Any],
+    ) -> NDArray[Any]:
+        dx = ndimage.sobel(intensities, axis=0)
+        dy = ndimage.sobel(intensities, axis=1)
+        dz = ndimage.sobel(intensities, axis=2)
+        mag = np.sqrt(dx ** 2 + dy ** 2 + dz ** 2)
+
+        intensities = intensities - (mag / mag.max())
+
+        return intensities
+
+    def __call__(
+        self,
+        intensities: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        # get intensities between 0 and 1
+        dtype = intensities.dtype
+        intensities = (intensities + 1024) / 4120
+
+        # denoise intensities using Haar transform
+        intensities = self.denoise(intensities)
+
+        # accentuate edges
+        intensities = self.edge_detection(intensities)
+
+        # get intensities back between -1024 and 3096
+        intensities = (intensities * 4120) - 1024
+        intensities = intensities.clip(-1024, 3096)
+
+        data_dict['intensities'] = intensities.astype(dtype)
+
+        return data_dict
+
+    def __repr__(self) -> str:
+        return self.__class__.__name__ + '()'
 
 
 class RelativePatchCoordinates:
