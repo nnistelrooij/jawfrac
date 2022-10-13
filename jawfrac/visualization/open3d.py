@@ -87,15 +87,3 @@ def draw_positive_voxels(
     colors = np.tile([50, 50, 50], (pos_voxel_idxs.shape[0], 1))
 
     visualize(pos_voxel_idxs, colors)
-
-
-def draw_confusion_matrix(
-    confmat: ConfusionMatrix,
-) -> None:
-    confmat = confmat.compute().cpu().numpy()
-    cmd = ConfusionMatrixDisplay(
-        confusion_matrix=confmat,
-        display_labels=('Controls', 'Fracture'),
-    )
-    cmd.plot()
-    plt.show()

@@ -294,13 +294,15 @@ class JawFracDataModule(VolumeDataModule):
         batch: List[Dict[str, TensorType[..., Any]]],
     ) -> Tuple[
         TensorType['C', 'D', 'H', 'W', torch.float32],
+        TensorType['D', 'H', 'W', torch.bool],
         TensorType['P', 3, 2, torch.int64],
         TensorType[4, 4, torch.float32],
         TensorType[3, torch.int64],
     ]:
         features = batch[0]['features']
+        mandible = batch[0]['mandible']
         patch_idxs = batch[0]['patch_idxs']
         affine = batch[0]['affine']
         shape = batch[0]['shape']
 
-        return features, patch_idxs, affine, shape
+        return features, mandible, patch_idxs, affine, shape

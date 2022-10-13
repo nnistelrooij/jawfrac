@@ -6,8 +6,8 @@ RUN apt -y install ffmpeg libsm6 libxext6
 
 # non-root user
 RUN groupadd -r algorithm && useradd -m --no-log-init -r -g algorithm algorithm
-RUN mkdir /opt/algorithm
-RUN chown -R algorithm:algorithm /opt/algorithm /opt/conda
+RUN mkdir /input /opt/algorithm /output
+RUN chown -R algorithm:algorithm /input /opt/algorithm /opt/conda /output
 USER algorithm
 
 # conda
@@ -23,7 +23,7 @@ RUN pip install torch-scatter -f https://data.pyg.org/whl/torch-1.11.0+cu113.htm
 # copy package and main file
 ENV LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/conda/lib/
 COPY --chown=algorithm:algorithm jawfrac/ jawfrac/
-COPY --chown=algorithm:algorithm train_mandibles.py .
+COPY --chown=algorithm:algorithm process.py .
 
 # script to run
-ENTRYPOINT ["python", "/opt/algorithm/train_mandibles.py"]
+ENTRYPOINT ["python", "/opt/algorithm/process.py"]

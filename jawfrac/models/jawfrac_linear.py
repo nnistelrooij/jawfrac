@@ -229,7 +229,7 @@ class LinearJawFracModule(pl.LightningModule):
         self.log('recall/test', self.recall_metric)
         
         # visualize results with Open3D
-        # draw_fracture_result(mandible, mask, labels >= self.conf_thresh)
+        draw_fracture_result(mandible, mask, labels >= self.conf_thresh)
 
     def test_epoch_end(self, _) -> None:
         draw_confusion_matrix(self.confmat)
@@ -238,19 +238,20 @@ class LinearJawFracModule(pl.LightningModule):
         self,
         batch: Tuple[
             TensorType['C', 'D', 'H', 'W', torch.float32],
+            TensorType['D', 'H', 'W', torch.bool],
             TensorType['P', 3, 2, torch.int64],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
         ],
         batch_idx: int,
     ) -> TensorType['P', torch.float32]:
-        features, patch_idxs, affine, shape = batch
+        features, mandible, patch_idxs, affine, shape = batch
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)
 
         mask = filter_connected_components(
-            x ,self.conf_thresh, self.min_component_size,
+            mandible, x ,self.conf_thresh, self.min_component_size,
         )
 
         out = fill_source_volume(mask, affine, shape)

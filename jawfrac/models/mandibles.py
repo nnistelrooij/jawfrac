@@ -57,7 +57,7 @@ def filter_connected_components(
         dim=0,
     )
     component_dists = torch.sum(component_coords ** 2, dim=1)
-    dist_mask = component_dists < 2
+    dist_mask = component_dists < 4
 
     # project masks back to volume
     component_mask = count_mask & prob_mask & dist_mask
@@ -76,6 +76,7 @@ class MandibleSegModule(pl.LightningModule):
         weight_decay: float,
         focal_loss: bool,
         dice_loss: bool,
+        return_source_volume: bool=True,
         **model_cfg: Dict[str, Any],
     ) -> None:
         super().__init__()
@@ -88,6 +89,7 @@ class MandibleSegModule(pl.LightningModule):
         self.epochs = epochs
         self.warmup_epochs = warmup_epochs
         self.weight_decay = weight_decay
+        self.return_source_volume = return_source_volume
 
     def forward(
         self,
@@ -211,6 +213,9 @@ class MandibleSegModule(pl.LightningModule):
 
         # remove small or low-confidence connected components
         volume_mask = filter_connected_components(coords, seg)
+
+        if not self.return_source_volume:
+            return volume_mask
 
         # fill volume with original shape given foreground mask
         out = fill_source_volume(volume_mask, affine, shape)

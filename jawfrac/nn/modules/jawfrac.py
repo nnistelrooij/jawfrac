@@ -1,13 +1,12 @@
-from typing import Dict, List, Tuple, Union
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
 from torchtyping import TensorType
 
 from jawfrac.nn.modules.gapm import GrayscaleAdaptivePerceptionModule
-from jawfrac.nn.modules.loss import SegmentationLoss
 from jawfrac.nn.modules.swin_unetr import SwinUNETRBackbone
-from jawfrac.nn.modules.unet import Decoder, Encoder
+from jawfrac.nn.modules.unet import Encoder
 
 
 class JawFracCascadeNet(nn.Module):
@@ -77,7 +76,7 @@ class JawFracCascadeNet(nn.Module):
         fractures: TensorType['B', '[C]', 'D', 'H', 'W', torch.float32],
     ) -> Tuple[
         TensorType['B', torch.float32],
-        TensorType['B', 'D', 'H', 'W', torch.float32],
+        TensorType['B', '[C]', torch.float32],
     ]:
         x = self.gapm(x)
 
@@ -90,9 +89,8 @@ class JawFracCascadeNet(nn.Module):
         xs = self.encoder(x)
         embedding = xs[0].mean(dim=(2, 3, 4))
         logits = self.head(embedding)
-        logits = logits.squeeze(dim=1) if self.num_classes == 2 else logits
         
-        return logits
+        return logits.squeeze(dim=1) if self.num_classes == 2 else logits
 
 
 class JawFracLoss(nn.Module):

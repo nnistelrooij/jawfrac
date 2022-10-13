@@ -222,6 +222,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self,
         batch: Tuple[
             TensorType[1, 'D', 'H', 'W', torch.float32],
+            TensorType['D', 'H', 'W', torch.bool],
             TensorType['P', 3, 2, torch.int64],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
@@ -231,7 +232,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         TensorType['D', 'H', 'W', torch.bool],
         TensorType['D', 'H', 'W', torch.bool],
     ]:
-        features, patch_idxs, affine, shape = batch
+        features, mandible, patch_idxs, affine, shape = batch
 
         # predict dense binary segmentations
         linear, displaced = self.predict_volumes(features, patch_idxs)
@@ -239,10 +240,10 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         # filter small connected components
         linear[displaced >= self.conf_thresh] = 0
         linear = filter_connected_components(
-            linear, self.conf_thresh, self.min_component_size,
+            mandible, linear, self.conf_thresh, self.min_component_size,
         )
         displaced = filter_connected_components(
-            displaced, self.conf_thresh, self.min_component_size,
+            mandible, displaced, self.conf_thresh, self.min_component_size,
         )
 
         # fill corresponding voxels in source volume

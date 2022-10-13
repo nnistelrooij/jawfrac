@@ -17,7 +17,7 @@ def batch_forward(
     patch_slices = []
     for patch_idxs in patch_idxs:
         slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-        patch_slices.append(slices)
+        patch_slices.append((slice(None),) + slices)
 
     batches = []
     batch_size //= 1 + x_axis_flip
@@ -25,7 +25,6 @@ def batch_forward(
         # extract batch of patches from features volume
         x = []
         for slices in patch_slices[i:i + batch_size]:
-            slices = (slice(None),) + slices
             patch = features[slices]
             x.append(patch)
             if x_axis_flip: x.append(patch.fliplr())
@@ -44,9 +43,13 @@ def batch_forward(
     if not x_axis_flip:
         return out[0] if len(out) == 1 else out
 
-    # take maximum of predictions from same patches
+    # take mean of predictions from same patches
     for i, batches in enumerate(out):
-        preds = torch.maximum(batches[::2], batches[1::2].fliplr())
+        batches = torch.stack((
+            batches[::2],
+            batches[1::2].fliplr() if batches.dim() == 4 else batches[1::2],
+        ))
+        preds = torch.mean(batches, dim=0)
         out = out[:i] + (preds,) + out[i + 1:]
 
     # return simplest data structure
@@ -102,7 +105,7 @@ def interpolate_sparse_predictions(
     out_down = torch.from_numpy(out_down).to(pred)
 
     # repeat values to scale up interpolated predictions
-    out_interp = out_down.tile(scale, scale, scale, 1)
+    out_interp = out_down.tile(*(scale,)*3, *(1,)*(pred.dim() - 3))
     out_interp = out_interp[tuple(slice(None, dim) for dim in out_shape)]
 
     return out_interp
@@ -176,8 +179,8 @@ def fill_source_volume(
     # dilate volume to fill empty space between foreground voxels
     out = ndimage.binary_dilation(
         input=out,
-        structure=ndimage.generate_binary_structure(3, 2),
-        iterations=3,
+        structure=ndimage.generate_binary_structure(3, 1),
+        iterations=1,
     )
 
     return torch.from_numpy(out).to(volume_mask)

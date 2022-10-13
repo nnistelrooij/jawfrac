@@ -26,11 +26,6 @@ def infer():
         num_classes=dm.num_classes,
         **config['model'],
     )
-    # model = LinearDisplacedJawFracModule.load_from_checkpoint(
-    #     'checkpoints/fractures_linear_displaced4.ckpt',
-    #     num_classes=dm.num_classes,
-    #     **config['model'],
-    # )
 
     trainer = pl.Trainer(
         accelerator='gpu',
