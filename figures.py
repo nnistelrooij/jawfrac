@@ -3,25 +3,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import nibabel
 import numpy as np
-from numpy.typing import NDArray
-import open3d
 from scipy import ndimage
-from sklearn.metrics import ConfusionMatrixDisplay
-from torchmetrics import ConfusionMatrix
 
-from jawfrac.visualization.open3d import visualize
-
-
-def draw_confusion_matrix(
-    confmat: ConfusionMatrix,
-) -> None:
-    confmat = confmat.compute().cpu().numpy()
-    cmd = ConfusionMatrixDisplay(
-        confusion_matrix=confmat,
-        display_labels=('Controls', 'Fracture'),
-    )
-    cmd.plot()
-    plt.show()
+from jawfrac.visualization import visualize
 
 
 def wolla(path, threshold: int, min_voxels: int):
@@ -141,4 +125,4 @@ if __name__ == '__main__':
     # visualize_mandible(path, path.parent / 'mandible3.nii.gz')
     # visualize_mandible_patch(path)
 
-    visualize_mandible(path, path.parent / 'frac_pred.nii.gz')
+    visualize_mandible(path, path.parent / 'frac_pred2.nii.gz')

@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import pytorch_lightning as pl
 from scipy import ndimage
+from sklearn import neighbors
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 from torchmetrics import ConfusionMatrix, F1Score
@@ -10,7 +11,7 @@ from torch_scatter import scatter_mean
 
 from jawfrac.metrics import FracPrecision, FracRecall
 import jawfrac.nn as nn
-from jawfrac.models.common import (
+from jawfrac.models.common2 import (
     aggregate_dense_predictions,
     batch_forward,
     fill_source_volume,
@@ -61,13 +62,11 @@ def filter_connected_components(
         index=component_idxs.flatten(),
         dim=0,
     )
-    component_centroids = component_centroids.reshape(-1, 1, 3)
 
-    mandible_voxels = mandible.nonzero()[::4].float()
-    mandible_voxels = mandible_voxels.reshape(1, -1, 3)
-
-    dists = torch.sum((component_centroids - mandible_voxels) ** 2, dim=2)
-    component_dists = dists.amin(dim=1)
+    nbrs = neighbors.NearestNeighbors(n_neighbors=1, n_jobs=-1)
+    nbrs.fit(mandible.nonzero().cpu())
+    component_dists, _ = nbrs.kneighbors(component_centroids.cpu())[:, 0]
+    component_dists = torch.from_numpy(component_dists).to(seg)
     dist_mask = component_dists < max_dist
 
     # project masks back to volume
@@ -184,16 +183,24 @@ class LinearJawFracModule(pl.LightningModule):
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
         patch_idxs: TensorType['P', 3, 2, torch.int64],
     ) -> TensorType['D', 'H', 'W', torch.float32]:
-        # do model processing in batches
-        seg = batch_forward(self, features, patch_idxs)
-        if isinstance(seg, tuple):
-            seg = seg[1]
-        seg = torch.sigmoid(seg)
+        # initialize generator that aggregates predictions
+        mask_generator = aggregate_dense_predictions(
+            patch_idxs=patch_idxs,
+            out_shape=features.shape[1:],
+        )
 
-        # aggregate predictions of voxels in multiple patches
-        seg = aggregate_dense_predictions(seg, patch_idxs, features.shape[1:])
+        # get initial empty prediction
+        mask_pred = next(mask_generator)
 
-        return seg
+        # run the model and aggregate its predictions
+        for masks in batch_forward(self, features, patch_idxs):
+            for mask in masks:
+                mask_pred -= mask_pred
+                mask_pred += mask
+                next(mask_generator)
+
+        # do any post-processing steps and compute probabilities
+        return torch.sigmoid(next(mask_generator))
 
     def test_step(
         self,

@@ -11,6 +11,7 @@ from jawfrac.models import MandibleSegModule, LinearDisplacedJawFracModule
 def infer_mandible():
     with open('jawfrac/config/mandibles.yaml') as f:
         config = yaml.safe_load(f)
+        config['datamodule']['num_workers'] = 0
 
     pl.seed_everything(config['seed'])
 

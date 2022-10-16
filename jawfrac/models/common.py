@@ -4,6 +4,7 @@ import numpy as np
 from scipy import interpolate, ndimage
 import torch
 from torchtyping import TensorType
+from tqdm import trange
 
 
 def batch_forward(
@@ -11,7 +12,7 @@ def batch_forward(
     features: TensorType['C', 'D', 'H', 'W', torch.float32],
     patch_idxs: TensorType['P', 3, 2, torch.int64],
     x_axis_flip: bool=True,
-    batch_size: int=12,
+    batch_size: int=24,
 ):
     # convert patch indices to patch slices
     patch_slices = []
@@ -19,9 +20,8 @@ def batch_forward(
         slices = tuple(slice(start, stop) for start, stop in patch_idxs)
         patch_slices.append((slice(None),) + slices)
 
-    batches = []
     batch_size //= 1 + x_axis_flip
-    for i in range(0, len(patch_slices), batch_size):
+    for i in trange(0, len(patch_slices), batch_size, leave=False):
         # extract batch of patches from features volume
         x = []
         for slices in patch_slices[i:i + batch_size]:
@@ -32,28 +32,20 @@ def batch_forward(
         # predict relative position and segmentation of patches
         x = torch.stack(x)
         batch = model(x)
-        batches.append(batch)
 
-    # get tuple of concatenated output batches
-    if isinstance(batches[0], torch.Tensor):
-        batches = (batches,)
-    out = tuple(torch.cat(batches) for batches in zip(*batches))
+        if not x_axis_flip: yield batch
 
-    # return simplest data structure
-    if not x_axis_flip:
-        return out[0] if len(out) == 1 else out
+        if isinstance(batch, torch.Tensor):
+            yield (batch[::2] + batch[1::2].fliplr()) / 2
 
-    # take mean of predictions from same patches
-    for i, batches in enumerate(out):
-        batches = torch.stack((
-            batches[::2],
-            batches[1::2].fliplr() if batches.dim() == 4 else batches[1::2],
-        ))
-        preds = torch.mean(batches, dim=0)
-        out = out[:i] + (preds,) + out[i + 1:]
+        for i, pred in enumerate(batch):
+            pred = torch.stack((
+                pred[::2],
+                pred[1::2].fliplr() if pred.dim() == 4 else pred[1::2],
+            ))
+            batch = batch[:i] + (pred.mean(dim=0),) + batch[i + 1:]
 
-    # return simplest data structure
-    return out[0] if len(out) == 1 else out
+        yield batch
 
 
 def patches_subgrid(
@@ -102,27 +94,32 @@ def interpolate_sparse_predictions(
         bounds_error=False,
         fill_value=None,
     )
-    out_down = torch.from_numpy(out_down).to(pred)
+    out_interp = torch.from_numpy(out_down).to(pred)
 
     # repeat values to scale up interpolated predictions
-    out_interp = out_down.tile(*(scale,)*3, *(1,)*(pred.dim() - 3))
+    for dim in range(3):
+        out_interp = out_interp.repeat_interleave(scale, dim=dim)
     out_interp = out_interp[tuple(slice(None, dim) for dim in out_shape)]
 
     return out_interp
 
 
 def aggregate_sparse_predictions(
-    pred: TensorType['P', '...', torch.float32],
+    pred_shape: torch.Size,
     patch_idxs: TensorType['P', 3, 2, torch.int64],
     out_shape: torch.Size,
 ) -> TensorType['D', 'H', 'W', '...', torch.float32]:
     subgrid_idxs, subgrid_points, subgrid_shape = patches_subgrid(patch_idxs)
 
-    out = torch.zeros(subgrid_shape + pred.shape[1:])
-    out = out.to(pred) + pred.amin(dim=0)
-    index_arrays = tuple(subgrid_idxs.T)
-    out[index_arrays] = pred
+    out = torch.zeros(subgrid_shape + pred_shape).to(patch_idxs.device)
+    pred = torch.empty(pred_shape).to(patch_idxs.device)
+    yield pred
 
+    for idxs in subgrid_idxs:
+        out[tuple(idxs)] = pred
+        yield
+
+    out[out == 0] = out.amin(dim=(0, 1, 2))
     out = interpolate_sparse_predictions(
         out, subgrid_points, out_shape,
     )
@@ -131,11 +128,12 @@ def aggregate_sparse_predictions(
 
 
 def aggregate_dense_predictions(
-    pred: TensorType['P', 'size', 'size', 'size', torch.float32],
     patch_idxs: TensorType['P', 3, 2, torch.int64],
     out_shape: torch.Size,
     mode='max',
 ) -> TensorType['D', 'H', 'W', torch.float32]:
+    pred_shape = patch_idxs[0, : 1] - patch_idxs[0, :, 0]
+
     # convert patch indices to patch slices
     patch_slices = []
     for patch_idxs in patch_idxs:
@@ -144,16 +142,24 @@ def aggregate_dense_predictions(
 
     if mode == 'max':
         # compute maximum of overlapping predictions
-        out = torch.zeros(out_shape)
-        out = out.to(pred) + pred.amin()
-        for slices, pred in zip(patch_slices, pred):
+        out = torch.full(out_shape, float('-inf')).to(patch_idxs.device)
+        pred = torch.empty(pred_shape).to(patch_idxs.device)
+        yield pred
+
+        for slices in patch_slices:
             out[slices] = torch.maximum(out[slices], pred)
+            yield pred
     elif mode == 'mean':
         # compute mean of overlapping predictions
-        out = torch.zeros(out_shape).to(pred)
-        for slices, pred in zip(patch_slices, pred):
+        out = torch.zeros(out_shape).to(patch_idxs.device)
+        pred = torch.empty(pred_shape).to(patch_idxs.device)
+        yield pred
+
+        for slices in patch_slices:
             out[slices] += pred
-    else: raise ValueError(f'Mode not recognized: {mode}.')
+            yield pred
+    else:
+        raise ValueError(f'Mode not recognized: {mode}.')
 
     return out
 
@@ -171,6 +177,7 @@ def fill_source_volume(
         'ij,kj->ki', torch.linalg.inv(affine), hom_voxels,
     )
     orig_voxels = orig_voxels[:, :3].round().long()
+    orig_voxels = orig_voxels.clip(torch.zeros_like(shape), shape - 1)
 
     # initialize empty volume and fill with binary segmentation
     out = torch.zeros(shape.tolist(), dtype=torch.bool)

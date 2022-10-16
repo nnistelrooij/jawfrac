@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import pytorch_lightning as pl
-from scipy import interpolate, ndimage
+from scipy import ndimage
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 from torchmetrics import F1Score
@@ -14,7 +14,7 @@ from jawfrac.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearWarmupLR,
 )
-from jawfrac.models.common import (
+from jawfrac.models.common2 import (
     aggregate_dense_predictions,
     aggregate_sparse_predictions,
     batch_forward,
@@ -157,19 +157,41 @@ class MandibleSegModule(pl.LightningModule):
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
         patch_idxs: TensorType['P', 3, 2, torch.int64],
     ) -> Tuple[
-        TensorType['D', 'H', 'W', 3, torch.float32],
+        TensorType['D', 'H', 'W', torch.float32],
         TensorType['D', 'H', 'W', torch.float32],
     ]:
-        coords, seg = batch_forward(self.model, features, patch_idxs)
+        # initialize generators that aggregate predictions
+        coords_generator = aggregate_sparse_predictions(
+            pred_shape=(3,),
+            patch_idxs=patch_idxs,
+            out_shape=features.shape[1:],
+        )
+        mask_generator = aggregate_dense_predictions(
+            patch_idxs=patch_idxs,
+            out_shape=features.shape[1:],
+        )
 
-        coords = aggregate_sparse_predictions(
-            coords, patch_idxs, features.shape[1:],
-        )
-        seg = aggregate_dense_predictions(
-            seg, patch_idxs, features.shape[1:],
-        )
-        
-        return coords, torch.sigmoid(seg)
+        # get initial empty predictions
+        coords_pred = next(coords_generator)
+        mask_pred = next(mask_generator)
+
+        # run the model and aggregate its predictions
+        for coords, masks in batch_forward(self, features, patch_idxs):
+            for coords in coords:
+                coords_pred -= coords_pred
+                coords_pred += coords
+                next(coords_generator)
+
+            for mask in masks:
+                mask_pred -= mask_pred
+                mask_pred += mask
+                next(mask_generator)
+
+        # do any post-processing steps and compute probabilities
+        coords = next(coords_generator)
+        seg = torch.sigmoid(next(mask_generator))
+
+        return coords, seg
 
     def test_step(
         self,

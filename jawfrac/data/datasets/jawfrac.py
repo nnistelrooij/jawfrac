@@ -29,8 +29,8 @@ class JawFracDataset(VolumeDataset):
             T.NaturalHeadPositionOrient(),
             *((T.HaarTransform(),) if haar_transform else ()),
             T.PatchIndices(patch_size=patch_size, stride=stride),
+            T.BonePatchIndices(),
             *((
-                T.BonePatchIndices(),
                 T.LinearFracturePatchIndices(patch_size=patch_size),
                 T.DisplacedFracturePatchIndices(patch_size=patch_size),
                 T.ExpandLabel(**expand_label),

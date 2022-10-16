@@ -8,7 +8,7 @@ from torchtyping import TensorType
 
 from jawfrac.metrics import FracPrecision, FracRecall
 import jawfrac.nn as nn
-from jawfrac.models.common import (
+from jawfrac.models.common2 import (
     aggregate_sparse_predictions,
     aggregate_dense_predictions,
     batch_forward,
@@ -37,8 +37,10 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         first_stage: Dict[str, Any],
         second_stage: Dict[str, Any],
         third_stage: Dict[str, Any],
-        conf_threshold: float,
-        min_component_size: int,
+        linear_conf_threshold: float,
+        linear_min_component_size: int,
+        displaced_conf_threshold: float,
+        displaced_min_component_size: int,
         **model_cfg: Dict[str, Any],
     ) -> None:
         super().__init__()
@@ -75,8 +77,10 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.epochs = epochs
         self.warmup_epochs = warmup_epochs
         self.weight_decay = weight_decay
-        self.conf_thresh = conf_threshold
-        self.min_component_size = min_component_size
+        self.linear_conf_thresh = linear_conf_threshold
+        self.linear_min_component_size = linear_min_component_size
+        self.displaced_conf_thresh = displaced_conf_threshold
+        self.displaced_min_component_size = displaced_min_component_size
 
     def forward(
         self,
@@ -161,17 +165,36 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         TensorType['D', 'H', 'W', torch.float32],
         TensorType['D', 'H', 'W', torch.float32],
     ]:
-        # perform model inference in batches
-        masks, logits = batch_forward(self, features, patch_idxs)
+        # initialize generators that aggregate predictions
+        mask_generator = aggregate_dense_predictions(
+            patch_idxs=patch_idxs,
+            out_shape=features.shape[1:],
+        )
+        class_generator = aggregate_sparse_predictions(
+            pred_shape=(),
+            patch_idxs=patch_idxs,
+            out_shape=features.shape[1:],
+        )
 
-        # aggregate predictions from multiple patches
-        linear = aggregate_dense_predictions(
-            torch.sigmoid(masks), patch_idxs, features.shape[1:],
-        )
-        displaced = aggregate_sparse_predictions(
-            logits, patch_idxs, features.shape[1:],
-        )
-        displaced = torch.sigmoid(displaced)
+        # get initial empty predictions
+        mask_pred = next(mask_generator)
+        class_pred = next(class_generator)
+
+        # run the model and aggregate its predictions
+        for masks, logits in batch_forward(self, features, patch_idxs):
+            for mask in masks:
+                mask_pred -= mask_pred
+                mask_pred += mask
+                next(mask_generator)
+
+            for logit in logits:
+                class_pred -= class_pred
+                class_pred += logit
+                next(class_generator)
+
+        # do any post-processing steps and compute probabilities
+        linear = torch.sigmoid(next(mask_generator))
+        displaced = torch.sigmoid(next(class_generator))
 
         return linear, displaced
 
@@ -191,10 +214,10 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         linear, displaced = self.predict_volumes(features, patch_idxs)
 
         # filter connected components in each volume separately
-        mask = (linear + displaced) / 2
         mask = filter_connected_components(
-            mandible, mask, 0.5, self.min_component_size,
-        )
+            mandible, displaced,
+            self.displaced_conf_thresh, self.displaced_min_component_size,
+        )        
 
         # compute metrics
         self.confmat(
@@ -228,29 +251,22 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             TensorType[3, torch.int64],
         ],
         batch_idx: int,
-    ) -> Tuple[
-        TensorType['D', 'H', 'W', torch.bool],
-        TensorType['D', 'H', 'W', torch.bool],
-    ]:
+    ) -> TensorType['D', 'H', 'W', torch.bool]:
         features, mandible, patch_idxs, affine, shape = batch
 
         # predict dense binary segmentations
         linear, displaced = self.predict_volumes(features, patch_idxs)
 
         # filter small connected components
-        linear[displaced >= self.conf_thresh] = 0
-        linear = filter_connected_components(
-            mandible, linear, self.conf_thresh, self.min_component_size,
-        )
-        displaced = filter_connected_components(
-            mandible, displaced, self.conf_thresh, self.min_component_size,
-        )
+        mask = filter_connected_components(
+            mandible, displaced,
+            self.displaced_conf_thresh, self.displaced_min_component_size,
+        )      
 
         # fill corresponding voxels in source volume
-        linear = fill_source_volume(linear, affine, shape)
-        displaced = fill_source_volume(displaced, affine, shape)
+        mask = fill_source_volume(mask, affine, shape)
         
-        return linear, displaced
+        return mask
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],
