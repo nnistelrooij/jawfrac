@@ -1,6 +1,6 @@
 from typing import Any, List
 
-from sklearn.cluster import DBSCAN
+from scipy import ndimage
 import torch
 from torchmetrics import Metric
 from torchtyping import TensorType
@@ -27,14 +27,23 @@ class FracRecall(Metric):
         self,
         volume: TensorType['D', 'H', 'W', Any],
     ) -> List[TensorType['N', 3, torch.int64]]:
-        voxel_idxs = volume.nonzero()
-        dbscan = DBSCAN(eps=self.max_neighbor_dist, min_samples=100, n_jobs=-1)
-        dbscan.fit(voxel_idxs.cpu())
+        voxels = torch.cartesian_prod(*[torch.arange(d) for d in volume.shape])
+        voxels = voxels.reshape(volume.shape + (3,))
 
-        cluster_idxs = torch.from_numpy(dbscan.labels_).to(voxel_idxs)
+        cluster_idxs, _ = ndimage.label(
+            input=volume.cpu(),
+            structure=ndimage.generate_binary_structure(3, 1),
+        )
+        cluster_idxs = torch.from_numpy(cluster_idxs).to(volume.device)
+
+        _, inverse, counts = torch.unique(
+            cluster_idxs.flatten(), return_inverse=True, return_counts=True,
+        )
+        cluster_idxs[(counts < 100)[inverse].reshape(cluster_idxs.shape)] = 0
+
         out = []
-        for i in range(cluster_idxs.max() + 1):
-            out.append(voxel_idxs[cluster_idxs == i])
+        for i in torch.unique(cluster_idxs.flatten())[1:]:
+            out.append(voxels[cluster_idxs == i])
         
         return out
 

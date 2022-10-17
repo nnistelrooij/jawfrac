@@ -8,7 +8,7 @@ from torchtyping import TensorType
 
 from jawfrac.metrics import FracPrecision, FracRecall
 import jawfrac.nn as nn
-from jawfrac.models.common2 import (
+from jawfrac.models.common import (
     aggregate_sparse_predictions,
     aggregate_dense_predictions,
     batch_forward,
@@ -37,6 +37,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         first_stage: Dict[str, Any],
         second_stage: Dict[str, Any],
         third_stage: Dict[str, Any],
+        x_axis_flip: bool,
         linear_conf_threshold: float,
         linear_min_component_size: int,
         displaced_conf_threshold: float,
@@ -77,6 +78,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.epochs = epochs
         self.warmup_epochs = warmup_epochs
         self.weight_decay = weight_decay
+        self.x_axis_flip = x_axis_flip
         self.linear_conf_thresh = linear_conf_threshold
         self.linear_min_component_size = linear_min_component_size
         self.displaced_conf_thresh = displaced_conf_threshold
@@ -146,8 +148,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.f1_1(classes, (y[1] >= 1).long())
 
         # segmentation metrics
-        masks = torch.sigmoid(masks) >= self.conf_thresh
-        target = y[0] >= self.conf_thresh
+        masks = torch.sigmoid(masks) >= self.linear_conf_thresh
+        target = y[0] >= self.linear_conf_thresh
         self.f1_2(masks[y[0] != -1].long(), target[y[0] != -1].long())
         
         # log metrics
@@ -181,7 +183,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         class_pred = next(class_generator)
 
         # run the model and aggregate its predictions
-        for masks, logits in batch_forward(self, features, patch_idxs):
+        batches = batch_forward(self, features, patch_idxs, self.x_axis_flip)
+        for masks, logits in batches:
             for mask in masks:
                 mask_pred -= mask_pred
                 mask_pred += mask
@@ -214,10 +217,25 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         linear, displaced = self.predict_volumes(features, patch_idxs)
 
         # filter connected components in each volume separately
+        # mask = filter_connected_components(
+        #     mandible, linear,
+        #     self.linear_conf_thresh, self.linear_min_component_size,
+        # )
+        # draw_fracture_result(mandible, mask, target >= self.linear_conf_thresh)
+
+
+        # mask = filter_connected_components(
+        #     mandible, displaced,
+        #     self.displaced_conf_thresh, self.displaced_min_component_size,
+        # )
+        # draw_fracture_result(mandible, mask, target >= self.linear_conf_thresh)
+
+
         mask = filter_connected_components(
-            mandible, displaced,
-            self.displaced_conf_thresh, self.displaced_min_component_size,
-        )        
+            mandible, (linear + displaced) / 2,
+            0.75, 2048,
+        )
+        draw_fracture_result(mandible, mask, target >= self.linear_conf_thresh)
 
         # compute metrics
         self.confmat(
@@ -226,17 +244,15 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         )
         self.f1_2(
             mask.long().flatten(),
-            (target >= self.conf_thresh).long().flatten(),
+            (target >= self.linear_conf_thresh).long().flatten(),
         )
-        self.precision_metric(mask, target > self.conf_thresh)
-        self.recall_metric(mask, target > self.conf_thresh)
+        self.precision_metric(mask, target > self.linear_conf_thresh)
+        self.recall_metric(mask, target > self.linear_conf_thresh)
         
         # log metrics
         self.log('f1/test', self.f1_2)
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall_metric)
-        
-        draw_fracture_result(mandible, mask, target >= self.conf_thresh)
 
     def test_epoch_end(self, _) -> None:
         draw_confusion_matrix(self.confmat)

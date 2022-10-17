@@ -11,8 +11,8 @@ def batch_forward(
     model: torch.nn.Module,
     features: TensorType['C', 'D', 'H', 'W', torch.float32],
     patch_idxs: TensorType['P', 3, 2, torch.int64],
-    x_axis_flip: bool=True,
-    batch_size: int=24,
+    x_axis_flip: bool=False,
+    batch_size: int=8,
 ):
     # convert patch indices to patch slices
     patch_slices = []
@@ -33,16 +33,21 @@ def batch_forward(
         x = torch.stack(x)
         batch = model(x)
 
-        if not x_axis_flip: yield batch
+        if not x_axis_flip:
+            yield batch
+            continue
 
         if isinstance(batch, torch.Tensor):
             yield (batch[::2] + batch[1::2].fliplr()) / 2
+            continue
 
         for i, pred in enumerate(batch):
             pred = torch.stack((
                 pred[::2],
                 pred[1::2].fliplr() if pred.dim() == 4 else pred[1::2],
             ))
+            if torch.any(torch.isnan(pred)):
+                k = 3
             batch = batch[:i] + (pred.mean(dim=0),) + batch[i + 1:]
 
         yield batch
@@ -124,7 +129,7 @@ def aggregate_sparse_predictions(
         out, subgrid_points, out_shape,
     )
 
-    return out
+    yield out
 
 
 def aggregate_dense_predictions(
@@ -132,7 +137,7 @@ def aggregate_dense_predictions(
     out_shape: torch.Size,
     mode='max',
 ) -> TensorType['D', 'H', 'W', torch.float32]:
-    pred_shape = patch_idxs[0, : 1] - patch_idxs[0, :, 0]
+    pred_shape = tuple(patch_idxs[0, :, 1] - patch_idxs[0, :, 0])
 
     # convert patch indices to patch slices
     patch_slices = []
@@ -148,7 +153,7 @@ def aggregate_dense_predictions(
 
         for slices in patch_slices:
             out[slices] = torch.maximum(out[slices], pred)
-            yield pred
+            yield
     elif mode == 'mean':
         # compute mean of overlapping predictions
         out = torch.zeros(out_shape).to(patch_idxs.device)
@@ -157,11 +162,11 @@ def aggregate_dense_predictions(
 
         for slices in patch_slices:
             out[slices] += pred
-            yield pred
+            yield
     else:
         raise ValueError(f'Mode not recognized: {mode}.')
 
-    return out
+    yield out
 
 
 def fill_source_volume(

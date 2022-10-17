@@ -14,7 +14,7 @@ from jawfrac.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearWarmupLR,
 )
-from jawfrac.models.common2 import (
+from jawfrac.models.common import (
     aggregate_dense_predictions,
     aggregate_sparse_predictions,
     batch_forward,

@@ -11,7 +11,7 @@ from torch_scatter import scatter_mean
 
 from jawfrac.metrics import FracPrecision, FracRecall
 import jawfrac.nn as nn
-from jawfrac.models.common2 import (
+from jawfrac.models.common import (
     aggregate_dense_predictions,
     batch_forward,
     fill_source_volume,
@@ -31,7 +31,7 @@ def filter_connected_components(
     seg: TensorType['D', 'H', 'W', torch.float32],
     conf_thresh: float,
     min_component_size: int,
-    max_dist: float=100.0,
+    max_dist: float=20.0,
 ) -> TensorType['D', 'H', 'W', torch.bool]:
     # determine connected components in volume
     labels = (seg >= conf_thresh).long()
@@ -65,9 +65,9 @@ def filter_connected_components(
 
     nbrs = neighbors.NearestNeighbors(n_neighbors=1, n_jobs=-1)
     nbrs.fit(mandible.nonzero().cpu())
-    component_dists, _ = nbrs.kneighbors(component_centroids.cpu())[:, 0]
-    component_dists = torch.from_numpy(component_dists).to(seg)
-    dist_mask = component_dists < max_dist
+    component_dists, _ = nbrs.kneighbors(component_centroids.cpu())
+    component_dists = torch.from_numpy(component_dists[:, 0]).to(seg)
+    dist_mask = component_dists <= max_dist
 
     # project masks back to volume
     component_mask = count_mask & prob_mask & dist_mask
