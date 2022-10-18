@@ -32,7 +32,7 @@ def filter_connected_components(
     conf_thresh: float,
     min_component_size: int,
     max_dist: float=20.0,
-) -> TensorType['D', 'H', 'W', torch.bool]:
+) -> TensorType['D', 'H', 'W', torch.int64]:
     # determine connected components in volume
     labels = (seg >= conf_thresh).long()
     component_idxs, _ = ndimage.label(
@@ -69,11 +69,12 @@ def filter_connected_components(
     component_dists = torch.from_numpy(component_dists[:, 0]).to(seg)
     dist_mask = component_dists <= max_dist
 
-    # project masks back to volume
+    # remove connected components and make their indices consecutive
     component_mask = count_mask & prob_mask & dist_mask
-    volume_mask = component_mask[component_idxs]
+    component_idxs[~component_mask[component_idxs]] = 0
+    component_idxs = (component_mask.cumsum(dim=0))[component_idxs]
 
-    return volume_mask
+    return component_idxs
 
 
 class LinearJawFracModule(pl.LightningModule):
@@ -218,7 +219,7 @@ class LinearJawFracModule(pl.LightningModule):
         x = self.predict_volume(features, patch_idxs)
         mask = filter_connected_components(
             mandible, x, self.conf_thresh, self.min_component_size,
-        )
+        ) > 0
 
         # compute metrics
         target = labels >= self.conf_thresh
@@ -259,7 +260,7 @@ class LinearJawFracModule(pl.LightningModule):
 
         mask = filter_connected_components(
             mandible, x ,self.conf_thresh, self.min_component_size,
-        )
+        ) > 0
 
         out = fill_source_volume(mask, affine, shape)
         

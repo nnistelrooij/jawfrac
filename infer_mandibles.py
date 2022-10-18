@@ -1,6 +1,6 @@
 import pytorch_lightning as pl
 import yaml
-import torch
+import torch.nn as nn
 from tqdm import tqdm
 
 from jawfrac.datamodules import MandibleSegDataModule
@@ -23,6 +23,9 @@ def infer():
         num_classes=dm.num_classes,
         **config['model'],
     )
+    for module in model.modules():
+        if isinstance(module, nn.BatchNorm3d):
+            module.track_running_stats = False
 
     trainer = pl.Trainer(
         # accelerator='gpu',

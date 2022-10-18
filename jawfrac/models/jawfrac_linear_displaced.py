@@ -1,6 +1,7 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 import pytorch_lightning as pl
+from scipy import ndimage
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 from torchmetrics import ConfusionMatrix, F1Score
@@ -25,6 +26,50 @@ from jawfrac.visualization import (
 )
 
 
+def combine_linear_displaced_components(
+    mandible: TensorType['D', 'H', 'W', torch.bool],
+    linear: TensorType['D', 'H', 'W', torch.float32],
+    displaced: TensorType['D', 'H', 'W', torch.float32],
+    linear_conf_threshold: float,
+    linear_min_component_size: int,
+    displaced_conf_threshold: float,
+    displaced_min_component_size: int,
+    mean_conf_threshold: float,
+    mean_min_component_size: int,
+) -> TensorType['D', 'H', 'W', torch.int64]:
+    # filter connected components in each volume separately
+    linear = filter_connected_components(
+        mandible, linear,
+        linear_conf_threshold, linear_min_component_size,
+    )
+    displaced = filter_connected_components(
+        mandible, displaced,
+        displaced_conf_threshold, displaced_min_component_size,
+    )
+
+    # make a volume from the combination of both volumes
+    out = filter_connected_components(
+        mandible, (linear + displaced) / 2,
+        mean_conf_threshold, mean_min_component_size,
+    )
+
+    # add components only present in segmentation volume
+    for i in range(1, linear.max() + 1):
+        if torch.any(out[linear == i]):
+            continue
+
+        out[linear == i] = out.max() + 1
+    
+    # add components only present in interpolation volume
+    for i in range(1, displaced.max() + 1):
+        if torch.any(out[displaced == i]):
+            continue
+
+        out[displaced == i] = out.max() + 1
+
+    return out
+
+
 class LinearDisplacedJawFracModule(pl.LightningModule):
 
     def __init__(
@@ -38,10 +83,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         second_stage: Dict[str, Any],
         third_stage: Dict[str, Any],
         x_axis_flip: bool,
-        linear_conf_threshold: float,
-        linear_min_component_size: int,
-        displaced_conf_threshold: float,
-        displaced_min_component_size: int,
+        post_processing: Dict[str, Union[float, int]],
         **model_cfg: Dict[str, Any],
     ) -> None:
         super().__init__()
@@ -79,10 +121,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.warmup_epochs = warmup_epochs
         self.weight_decay = weight_decay
         self.x_axis_flip = x_axis_flip
-        self.linear_conf_thresh = linear_conf_threshold
-        self.linear_min_component_size = linear_min_component_size
-        self.displaced_conf_thresh = displaced_conf_threshold
-        self.displaced_min_component_size = displaced_min_component_size
+        self.post_processing = post_processing
+        self.conf_thresh = post_processing['linear_conf_threshold']
 
     def forward(
         self,
@@ -148,8 +188,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.f1_1(classes, (y[1] >= 1).long())
 
         # segmentation metrics
-        masks = torch.sigmoid(masks) >= self.linear_conf_thresh
-        target = y[0] >= self.linear_conf_thresh
+        masks = torch.sigmoid(masks) >= self.conf_thresh
+        target = y[0] >= self.conf_thresh
         self.f1_2(masks[y[0] != -1].long(), target[y[0] != -1].long())
         
         # log metrics
@@ -215,27 +255,11 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
 
         # predict binary segmentations
         linear, displaced = self.predict_volumes(features, patch_idxs)
+        mask = combine_linear_displaced_components(
+            mandible, linear, displaced, **self.post_processing,
+        ) > 0
 
-        # filter connected components in each volume separately
-        # mask = filter_connected_components(
-        #     mandible, linear,
-        #     self.linear_conf_thresh, self.linear_min_component_size,
-        # )
-        # draw_fracture_result(mandible, mask, target >= self.linear_conf_thresh)
-
-
-        # mask = filter_connected_components(
-        #     mandible, displaced,
-        #     self.displaced_conf_thresh, self.displaced_min_component_size,
-        # )
-        # draw_fracture_result(mandible, mask, target >= self.linear_conf_thresh)
-
-
-        mask = filter_connected_components(
-            mandible, (linear + displaced) / 2,
-            0.75, 2048,
-        )
-        draw_fracture_result(mandible, mask, target >= self.linear_conf_thresh)
+        draw_fracture_result(mandible, mask, target >= self.conf_thresh)
 
         # compute metrics
         self.confmat(
@@ -244,10 +268,10 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         )
         self.f1_2(
             mask.long().flatten(),
-            (target >= self.linear_conf_thresh).long().flatten(),
+            (target >= self.conf_thresh).long().flatten(),
         )
-        self.precision_metric(mask, target > self.linear_conf_thresh)
-        self.recall_metric(mask, target > self.linear_conf_thresh)
+        self.precision_metric(mask, target >= self.conf_thresh)
+        self.recall_metric(mask, target >= self.conf_thresh)
         
         # log metrics
         self.log('f1/test', self.f1_2)
@@ -274,10 +298,9 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         linear, displaced = self.predict_volumes(features, patch_idxs)
 
         # filter small connected components
-        mask = filter_connected_components(
-            mandible, displaced,
-            self.displaced_conf_thresh, self.displaced_min_component_size,
-        )      
+        mask = combine_linear_displaced_components(
+            mandible, linear, displaced, **self.post_processing,
+        ) > 0
 
         # fill corresponding voxels in source volume
         mask = fill_source_volume(mask, affine, shape)

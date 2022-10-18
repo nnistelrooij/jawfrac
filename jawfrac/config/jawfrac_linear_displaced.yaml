@@ -30,10 +30,13 @@ model:
     backbone: 'conv'
     channels_list: [16, 32, 64, 128]
   x_axis_flip: True
-  linear_conf_threshold: 0.2
-  linear_min_component_size: 2048
-  displaced_conf_threshold: 0.9
-  displaced_min_component_size: 24_000
+  post_processing:
+    linear_conf_threshold: 0.2
+    linear_min_component_size: 2048
+    displaced_conf_threshold: 0.9
+    displaced_min_component_size: 24_000
+    mean_conf_threshold: 0.75
+    mean_min_component_size: 2048
 
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'

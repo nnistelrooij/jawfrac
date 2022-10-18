@@ -99,11 +99,31 @@ class JawFracDataModule(VolumeDataModule):
         List[Tuple[Path, ...]],
         List[Tuple[Path, ...]],
     ]:
+        if self.val_size == 0 and self.test_size == 0:
+            return files, [], []
+            
         if self.val_size == 1:
             return [], files, []
 
-        # take subsample of DataFrame comprised by given patient files
+        patient_files = self._split_patients(files)
+        control_files = self._split_controls(files)
+        files = [pfs + cfs for pfs, cfs in zip(patient_files, control_files)]
+
+        return tuple(files)
+
+    def _split_patients(
+        self,
+        files: List[Tuple[Path, ...]],
+    ) -> Tuple[
+        List[Tuple[Path, ...]],
+        List[Tuple[Path, ...]],
+        List[Tuple[Path, ...]],
+    ]:
         patient_files = [fs for fs in files if 'Controls' not in str(fs[0])]
+        if not patient_files:
+            return [], [], []
+
+        # take subsample of DataFrame comprised by given patient files
         df = pd.read_csv(self.root / 'Sophie overview 2.0.csv')
         idxs = [int(fs[0].parent.stem) - 1 for fs in patient_files]
         df = df.iloc[idxs].reset_index()
@@ -133,10 +153,6 @@ class JawFracDataModule(VolumeDataModule):
         val_test_files = [patient_files[i] for i in val_test_idxs]
         one_hots = one_hots[val_test_idxs]
 
-        # return if there should not be validation or test files
-        if self.val_size == 0.0 and self.test_size == 0.0:
-            return train_files, [], []
-
         # make multi-label stratified split for validation and test files
         splitter = IterativeStratification(
             n_splits=2,
@@ -151,23 +167,34 @@ class JawFracDataModule(VolumeDataModule):
         val_files = [val_test_files[i] for i in val_idxs]
         test_files = [val_test_files[i] for i in test_idxs]
 
+        return train_files, val_files, test_files
+
+    def _split_controls(
+        self,
+        files: List[Tuple[Path, ...]],
+    ) -> Tuple[
+        List[Tuple[Path, ...]],
+        List[Tuple[Path, ...]],
+        List[Tuple[Path, ...]],
+    ]:
+        patient_files = [fs for fs in files if 'Controls' not in str(fs[0])]
         control_files = [fs for fs in files if 'Controls' in str(fs[0])]
         if not control_files:
-            return train_files, val_files, test_files
+            return [], [], []
 
         # randomly split control files among validation and test splits
         splitter = ShuffleSplit(
             n_splits=1,
-            test_size=len(test_files),
-            train_size=len(val_files),
+            test_size=self.test_size * len(patient_files),
+            train_size=self.val_size * len(patient_files),
             random_state=self.seed,
         )
         val_idxs, test_idxs = next(splitter.split(control_files))
 
-        val_files += [control_files[i] for i in val_idxs]
-        test_files += [control_files[i] for i in test_idxs]
+        val_files = [control_files[i] for i in val_idxs]
+        test_files = [control_files[i] for i in test_idxs]
 
-        return train_files, val_files, test_files
+        return [], val_files, test_files
 
     def setup(self, stage: Optional[str]=None) -> None:
         if stage is None or stage == 'fit':

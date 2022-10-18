@@ -1,6 +1,7 @@
 import nibabel
 import numpy as np
 import pytorch_lightning as pl
+import torch.nn as nn
 import yaml
 
 from jawfrac.datamodules import JawFracDataModule
@@ -26,6 +27,9 @@ def infer():
         num_classes=dm.num_classes,
         **config['model'],
     )
+    for module in model.modules():
+        if isinstance(module, nn.BatchNorm3d):
+            module.track_running_stats = False
 
     trainer = pl.Trainer(
         accelerator='gpu',
