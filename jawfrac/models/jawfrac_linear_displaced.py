@@ -250,7 +250,10 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             TensorType['D', 'H', 'W', torch.float32],
         ],
         batch_idx: int,
-    ) -> None:
+    ) -> Tuple[
+        TensorType['D', 'H', 'W', torch.float32],
+        TensorType['D', 'H', 'W', torch.float32],
+    ]:
         features, mandible, patch_idxs, target = batch
 
         # predict binary segmentations
@@ -278,8 +281,18 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall_metric)
 
-    def test_epoch_end(self, _) -> None:
-        draw_confusion_matrix(self.confmat)
+        return linear.cpu(), displaced.cpu()
+
+    def test_epoch_end(
+        self,
+        outputs: List[Tuple[
+            TensorType['D', 'H', 'W', torch.float32],
+            TensorType['D', 'H', 'W', torch.float32],
+        ]]
+    ) -> None:
+        torch.save(outputs, 'outputs.pth')
+
+        draw_confusion_matrix(self.confmat.compute(), title='Binary scan')
 
     def predict_step(
         self,

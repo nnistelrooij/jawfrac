@@ -90,12 +90,14 @@ def draw_positive_voxels(
 
 
 def draw_confusion_matrix(
-    confmat: ConfusionMatrix,
+    confmat: TensorType['C', 'C', torch.int64],
+    title: str='Confusion Matrix',
 ) -> None:
-    confmat = confmat.compute().cpu().numpy()
+    confmat = confmat.cpu().numpy()
     cmd = ConfusionMatrixDisplay(
         confusion_matrix=confmat,
         display_labels=('Controls', 'Fracture'),
     )
     cmd.plot()
+    plt.title(title)
     plt.show()

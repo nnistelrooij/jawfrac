@@ -46,8 +46,6 @@ def batch_forward(
                 pred[::2],
                 pred[1::2].fliplr() if pred.dim() == 4 else pred[1::2],
             ))
-            if torch.any(torch.isnan(pred)):
-                k = 3
             batch = batch[:i] + (pred.mean(dim=0),) + batch[i + 1:]
 
         yield batch
@@ -116,8 +114,8 @@ def aggregate_sparse_predictions(
 ) -> TensorType['D', 'H', 'W', '...', torch.float32]:
     subgrid_idxs, subgrid_points, subgrid_shape = patches_subgrid(patch_idxs)
 
-    out = torch.zeros(subgrid_shape + pred_shape).to(patch_idxs.device)
-    pred = torch.empty(pred_shape).to(patch_idxs.device)
+    out = torch.zeros(subgrid_shape + pred_shape, device=patch_idxs.device)
+    pred = torch.empty(pred_shape, device=patch_idxs.device)
     yield pred
 
     for idxs in subgrid_idxs:
@@ -147,8 +145,8 @@ def aggregate_dense_predictions(
 
     if mode == 'max':
         # compute maximum of overlapping predictions
-        out = torch.full(out_shape, float('-inf')).to(patch_idxs.device)
-        pred = torch.empty(pred_shape).to(patch_idxs.device)
+        out = torch.full(out_shape, float('-inf'), device=patch_idxs.device)
+        pred = torch.empty(pred_shape, device=patch_idxs.device)
         yield pred
 
         for slices in patch_slices:
@@ -156,8 +154,8 @@ def aggregate_dense_predictions(
             yield
     elif mode == 'mean':
         # compute mean of overlapping predictions
-        out = torch.zeros(out_shape).to(patch_idxs.device)
-        pred = torch.empty(pred_shape).to(patch_idxs.device)
+        out = torch.zeros(out_shape, device=patch_idxs.device)
+        pred = torch.empty(pred_shape, device=patch_idxs.device)
         yield pred
 
         for slices in patch_slices:
