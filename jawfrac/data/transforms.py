@@ -113,9 +113,10 @@ class MandibleCrop:
             volume[crop_slices] = data_dict[key][padded_slices]
             data_dict[key] = volume
 
-        # determine affine transformation from source to crop
+        # determine affine transformation from source to extended crop
         affine = np.eye(4)
         affine[:3, 3] -= [s.start for s in padded_slices]
+        affine[:3, 3] -= [min(0, s.start - p) for s, p in zip(slices, padding)]
         data_dict['affine'] = affine @ data_dict.get('affine', np.eye(4))
 
         return data_dict

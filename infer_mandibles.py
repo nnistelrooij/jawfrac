@@ -13,14 +13,15 @@ def infer():
     with open('jawfrac/config/mandibles.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
-    config['datamodule']['batch_size'] = 1
+    batch_size = config['datamodule'].pop('batch_size')
     dm = MandibleSegDataModule(
-        seed=config['seed'], **config['datamodule'],
+        seed=config['seed'], batch_size=1, **config['datamodule'],
     )
 
     model = MandibleSegModule.load_from_checkpoint(
         'checkpoints/mandibles.ckpt',
         num_classes=dm.num_classes,
+        batch_size=batch_size,
         **config['model'],
     )
     for module in model.modules():
@@ -28,8 +29,8 @@ def infer():
             module.track_running_stats = False
 
     trainer = pl.Trainer(
-        # accelerator='gpu',
-        # devices=1,
+        accelerator='gpu',
+        devices=1,
         max_epochs=config['model']['epochs'],
     )
     preds = trainer.predict(model, datamodule=dm)
@@ -43,7 +44,7 @@ def infer():
         # save to storage
         volume = volume.cpu().numpy().astype(np.uint16)
         img = nibabel.Nifti1Image(volume, affine)
-        nibabel.save(img, path.parent / 'mandible3.nii.gz')
+        nibabel.save(img, path.parent / 'mandible2.nii.gz')
 
 
 if __name__ == '__main__':

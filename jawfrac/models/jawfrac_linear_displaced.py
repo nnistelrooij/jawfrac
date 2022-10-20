@@ -23,6 +23,7 @@ from jawfrac.optim.lr_scheduler import (
 from jawfrac.visualization import (
     draw_confusion_matrix,
     draw_fracture_result,
+    draw_positive_voxels,
 )
 
 
@@ -30,28 +31,33 @@ def combine_linear_displaced_components(
     mandible: TensorType['D', 'H', 'W', torch.bool],
     linear: TensorType['D', 'H', 'W', torch.float32],
     displaced: TensorType['D', 'H', 'W', torch.float32],
+    max_dist: float,
     linear_conf_threshold: float,
     linear_min_component_size: int,
     displaced_conf_threshold: float,
     displaced_min_component_size: int,
     mean_conf_threshold: float,
     mean_min_component_size: int,
+    verbose: bool,
 ) -> TensorType['D', 'H', 'W', torch.int64]:
-    # filter connected components in each volume separately
-    linear = filter_connected_components(
-        mandible, linear,
-        linear_conf_threshold, linear_min_component_size,
-    )
-    displaced = filter_connected_components(
-        mandible, displaced,
-        displaced_conf_threshold, displaced_min_component_size,
-    )
-
     # make a volume from the combination of both volumes
     out = filter_connected_components(
         mandible, (linear + displaced) / 2,
-        mean_conf_threshold, mean_min_component_size,
+        mean_conf_threshold, mean_min_component_size, max_dist,
     )
+
+    # filter connected components in each volume separately
+    linear = filter_connected_components(
+        mandible, linear,
+        linear_conf_threshold, linear_min_component_size, max_dist,
+    )
+    displaced = filter_connected_components(
+        mandible, displaced,
+        displaced_conf_threshold, displaced_min_component_size, max_dist,
+    )
+
+    if verbose:
+        draw_positive_voxels(mandible, linear, displaced, out)
 
     # add components only present in segmentation volume
     for i in range(1, linear.max() + 1):
@@ -84,6 +90,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         third_stage: Dict[str, Any],
         x_axis_flip: bool,
         post_processing: Dict[str, Union[float, int]],
+        batch_size: int=0,
         **model_cfg: Dict[str, Any],
     ) -> None:
         super().__init__()
@@ -120,9 +127,11 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.epochs = epochs
         self.warmup_epochs = warmup_epochs
         self.weight_decay = weight_decay
+        self.batch_size = batch_size
         self.x_axis_flip = x_axis_flip
         self.post_processing = post_processing
         self.conf_thresh = post_processing['linear_conf_threshold']
+        self.verbose = post_processing['verbose']
 
     def forward(
         self,
@@ -223,7 +232,13 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         class_pred = next(class_generator)
 
         # run the model and aggregate its predictions
-        batches = batch_forward(self, features, patch_idxs, self.x_axis_flip)
+        batches = batch_forward(
+            model=self,
+            features=features,
+            patch_idxs=patch_idxs,
+            x_axis_flip=self.x_axis_flip,
+            batch_size=self.batch_size,
+        )
         for masks, logits in batches:
             for mask in masks:
                 mask_pred -= mask_pred
@@ -254,15 +269,20 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         TensorType['D', 'H', 'W', torch.float32],
         TensorType['D', 'H', 'W', torch.float32],
     ]:
+        files = self.trainer.datamodule.test_dataset.files[batch_idx]
+        print(files[0].parent.stem)
+
         features, mandible, patch_idxs, target = batch
 
         # predict binary segmentations
         linear, displaced = self.predict_volumes(features, patch_idxs)
+        
         mask = combine_linear_displaced_components(
             mandible, linear, displaced, **self.post_processing,
         ) > 0
 
-        draw_fracture_result(mandible, mask, target >= self.conf_thresh)
+        if self.verbose:
+            draw_fracture_result(mandible, mask, target >= self.conf_thresh)
 
         # compute metrics
         self.confmat(
@@ -290,7 +310,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             TensorType['D', 'H', 'W', torch.float32],
         ]]
     ) -> None:
-        torch.save(outputs, 'outputs.pth')
+        # torch.save(outputs, 'outputs.pth')
 
         draw_confusion_matrix(self.confmat.compute(), title='Binary scan')
 
@@ -305,6 +325,9 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         ],
         batch_idx: int,
     ) -> TensorType['D', 'H', 'W', torch.bool]:
+        files = self.trainer.datamodule.predict_dataset.files[batch_idx]
+        print(files[0].parent.stem)
+
         features, mandible, patch_idxs, affine, shape = batch
 
         # predict dense binary segmentations

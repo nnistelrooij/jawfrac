@@ -49,8 +49,6 @@ class MandibleSegDataset(VolumeDataset):
         # clip intensities to sensible range
         intensities = intensities.clip(-1024, 3096)
 
-        print(file.parent.stem)
-
         return {
             'intensities': intensities.astype(np.int16),
             'spacing': np.array(img.header.get_zooms()),

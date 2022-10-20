@@ -76,7 +76,8 @@ class MandibleSegModule(pl.LightningModule):
         weight_decay: float,
         focal_loss: bool,
         dice_loss: bool,
-        return_source_volume: bool=True,
+        x_axis_flip: bool,
+        batch_size: int=0,
         **model_cfg: Dict[str, Any],
     ) -> None:
         super().__init__()
@@ -89,7 +90,8 @@ class MandibleSegModule(pl.LightningModule):
         self.epochs = epochs
         self.warmup_epochs = warmup_epochs
         self.weight_decay = weight_decay
-        self.return_source_volume = return_source_volume
+        self.x_axis_flip = x_axis_flip
+        self.batch_size = batch_size
 
     def forward(
         self,
@@ -176,7 +178,14 @@ class MandibleSegModule(pl.LightningModule):
         mask_pred = next(mask_generator)
 
         # run the model and aggregate its predictions
-        for coords, masks in batch_forward(self, features, patch_idxs):
+        batches = batch_forward(
+            model=self,
+            features=features,
+            patch_idxs=patch_idxs,
+            x_axis_flip=self.x_axis_flip,
+            batch_size=self.batch_size,
+        )
+        for coords, masks in batches:
             for coords in coords:
                 coords_pred -= coords_pred
                 coords_pred += coords
@@ -228,6 +237,9 @@ class MandibleSegModule(pl.LightningModule):
         ],
         batch_idx: int,
     ) -> TensorType['D', 'H', 'W', torch.bool]:
+        files = self.trainer.datamodule.predict_dataset.files[batch_idx]
+        print(files[0].parent.stem)
+        
         features, patch_idxs, affine, shape = batch
 
         # predict binary segmentation
@@ -235,9 +247,6 @@ class MandibleSegModule(pl.LightningModule):
 
         # remove small or low-confidence connected components
         volume_mask = filter_connected_components(coords, seg)
-
-        if not self.return_source_volume:
-            return volume_mask
 
         # fill volume with original shape given foreground mask
         out = fill_source_volume(volume_mask, affine, shape)

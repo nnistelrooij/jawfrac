@@ -11,8 +11,8 @@ def batch_forward(
     model: torch.nn.Module,
     features: TensorType['C', 'D', 'H', 'W', torch.float32],
     patch_idxs: TensorType['P', 3, 2, torch.int64],
-    x_axis_flip: bool=False,
-    batch_size: int=8,
+    x_axis_flip: bool,
+    batch_size: int,
 ):
     # convert patch indices to patch slices
     patch_slices = []
@@ -38,8 +38,7 @@ def batch_forward(
             continue
 
         if isinstance(batch, torch.Tensor):
-            yield (batch[::2] + batch[1::2].fliplr()) / 2
-            continue
+            batch = (batch,)
 
         for i, pred in enumerate(batch):
             pred = torch.stack((
@@ -48,7 +47,7 @@ def batch_forward(
             ))
             batch = batch[:i] + (pred.mean(dim=0),) + batch[i + 1:]
 
-        yield batch
+        yield batch if len(batch) > 1 else batch[0]
 
 
 def patches_subgrid(
@@ -114,7 +113,7 @@ def aggregate_sparse_predictions(
 ) -> TensorType['D', 'H', 'W', '...', torch.float32]:
     subgrid_idxs, subgrid_points, subgrid_shape = patches_subgrid(patch_idxs)
 
-    out = torch.zeros(subgrid_shape + pred_shape, device=patch_idxs.device)
+    out = torch.empty(subgrid_shape + pred_shape, device=patch_idxs.device)
     pred = torch.empty(pred_shape, device=patch_idxs.device)
     yield pred
 
@@ -122,7 +121,6 @@ def aggregate_sparse_predictions(
         out[tuple(idxs)] = pred
         yield
 
-    out[out == 0] = out.amin(dim=(0, 1, 2))
     out = interpolate_sparse_predictions(
         out, subgrid_points, out_shape,
     )

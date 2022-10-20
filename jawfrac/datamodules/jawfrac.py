@@ -185,8 +185,8 @@ class JawFracDataModule(VolumeDataModule):
         # randomly split control files among validation and test splits
         splitter = ShuffleSplit(
             n_splits=1,
-            test_size=self.test_size * len(patient_files),
-            train_size=self.val_size * len(patient_files),
+            test_size=self.test_size / (self.val_size + self.test_size),
+            train_size=self.val_size / (self.val_size + self.test_size),
             random_state=self.seed,
         )
         val_idxs, test_idxs = next(splitter.split(control_files))
@@ -253,11 +253,23 @@ class JawFracDataModule(VolumeDataModule):
             )
 
         if stage is None or stage == 'predict':
-            files = self._files('predict')
+            all_files = self._files('predict')
+
+            non_frac_files = []
+            for files in all_files:
+                frac_file = self.root / files[0].parent / 'frac_pred.nii.gz'
+                if frac_file.exists():
+                    continue
+
+                label_file = self.root / files[0].parent / 'label.nii.gz'
+                if not label_file.exists():
+                    continue
+                
+                non_frac_files.append(files)
 
             self.predict_dataset = JawFracDataset(
                 stage='predict',
-                files=files,
+                files=non_frac_files[:1],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )

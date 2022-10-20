@@ -31,12 +31,14 @@ model:
     channels_list: [16, 32, 64, 128]
   x_axis_flip: True
   post_processing:
+    max_dist: 17.32  # 4 mm; sqrt(3 * (mm / regular_spacing) ** 2)
     linear_conf_threshold: 0.2
     linear_min_component_size: 2048
     displaced_conf_threshold: 0.9
     displaced_min_component_size: 24_000
-    mean_conf_threshold: 0.75
+    mean_conf_threshold: 0.55
     mean_min_component_size: 2048
+    verbose: False
 
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'
@@ -44,7 +46,7 @@ datamodule:
   regex_filter: 'Controls'
   val_size: 0.2
   test_size: 0.2
-  batch_size: 2
+  batch_size: 40
   num_workers: 1
   pin_memory: True
   persistent_workers: True
@@ -53,8 +55,8 @@ datamodule:
     extend: True
   regular_spacing: 0.4  # mm
   haar_transform: False
-  patch_size: 96
-  stride: 32
+  patch_size: 64
+  stride: 24
   expand_label:
     bone_iters: 1
     all_iters: 1

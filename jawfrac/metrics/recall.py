@@ -12,7 +12,7 @@ class FracRecall(Metric):
 
     def __init__(
         self,
-        iou_thresh: float=0.2,
+        iou_thresh: float=0.1,
         max_neighbor_dist: float=10.0,
     ):
         super().__init__()
@@ -39,7 +39,7 @@ class FracRecall(Metric):
         _, inverse, counts = torch.unique(
             cluster_idxs.flatten(), return_inverse=True, return_counts=True,
         )
-        cluster_idxs[(counts < 100)[inverse].reshape(cluster_idxs.shape)] = 0
+        cluster_idxs[(counts < 1000)[inverse].reshape(cluster_idxs.shape)] = 0
 
         out = []
         for i in torch.unique(cluster_idxs.flatten())[1:]:

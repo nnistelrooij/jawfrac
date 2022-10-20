@@ -1,37 +1,11 @@
-from typing import Any, Dict
-
 import nibabel
 import numpy as np
 import pytorch_lightning as pl
-import torch
 import yaml
+from tqdm import tqdm
 
 from jawfrac.datamodules import JawFracDataModule
 from jawfrac.models import LinearDisplacedJawFracModule
-
-
-def fix_batchnorm(
-    config: Dict[str, Any],
-    model: torch.nn.Module,
-) -> None:
-    mandible_ckpt_path = config['model']['first_stage']['checkpoint_path']
-    mandible_state_dict = torch.load(mandible_ckpt_path)['state_dict']
-    fracnet_ckpt_path = config['model']['second_stage']['checkpoint_path']
-    fracnet_state_dict = torch.load(fracnet_ckpt_path)['state_dict']
-
-    model_state_dict = model.state_dict()
-    for key in model_state_dict.copy():
-        if 'running' not in key:
-            continue
-
-        if 'mandible' in key:
-            old_key = key.replace('mandible_net', 'model')
-            model_state_dict[key] = mandible_state_dict[old_key]
-            
-        if 'frac_net' in key:
-            model_state_dict[key] = fracnet_state_dict[key]
-
-    model.load_state_dict(model_state_dict)
 
 
 def infer():
@@ -40,38 +14,42 @@ def infer():
 
     pl.seed_everything(config['seed'], workers=True)
 
-    config['datamodule']['batch_size'] = 1
+    batch_size = config['datamodule'].pop('batch_size')
     dm = JawFracDataModule(
         linear=True,
         displacements=True,
         seed=config['seed'],
+        batch_size=1,
         **config['datamodule'],
     )
 
     model = LinearDisplacedJawFracModule.load_from_checkpoint(
-        'checkpoints/new_fractures_linear_displaced_patch_size=96.ckpt',
+        'checkpoints/old_fractures_linear_displaced_patch_size=64.ckpt',
         num_classes=dm.num_classes,
+        batch_size=batch_size,
         **config['model'],
     )
-    fix_batchnorm(config, model)
 
     trainer = pl.Trainer(
         accelerator='gpu',
         devices=1,
         max_epochs=config['model']['epochs'],
     )
-    preds = trainer.test(model, datamodule=dm)
+    preds = trainer.predict(model, datamodule=dm)
 
-    for (file, _), pred in zip(dm.predict_dataset.files, preds):
-        pred = pred.cpu().numpy().astype(np.uint16)
+    for i, pred in enumerate(tqdm(preds)):
+        path = dm.root / dm.predict_dataset.files[i][0]
 
-        img = nibabel.load(dm.root / file)
-        affine = img.affine
+        label = nibabel.load(path.parent / 'label.nii.gz')
+        label = np.asarray(label.dataobj)
+        label[(label == 0) & pred.cpu().numpy()] = 3
 
-        file = file.parent / 'frac_pred2.nii.gz'
-        img = nibabel.Nifti1Image(pred, affine)
-        nibabel.save(img, dm.root / file)
+        img = nibabel.load(path)
+        file = path.parent / 'frac_pred.nii.gz'
+        img = nibabel.Nifti1Image(label, img.affine)
+        nibabel.save(img, file)
 
 
 if __name__ == '__main__':
-    infer()
+    while True:
+        infer()

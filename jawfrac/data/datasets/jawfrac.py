@@ -29,8 +29,8 @@ class JawFracDataset(VolumeDataset):
             T.NaturalHeadPositionOrient(),
             *((T.HaarTransform(),) if haar_transform else ()),
             T.PatchIndices(patch_size=patch_size, stride=stride),
-            T.BonePatchIndices(),
             *((
+                T.BonePatchIndices(),
                 T.LinearFracturePatchIndices(patch_size=patch_size),
                 T.DisplacedFracturePatchIndices(patch_size=patch_size),
                 T.ExpandLabel(**expand_label),
@@ -59,8 +59,6 @@ class JawFracDataset(VolumeDataset):
 
         seg = nibabel.load(self.root / mandible_file)
         mask = np.asarray(seg.dataobj) == 1
-
-        print(scan_file.parent.stem)
 
         return {
             'intensities': intensities.astype(np.int16),

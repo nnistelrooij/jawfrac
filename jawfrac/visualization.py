@@ -1,10 +1,11 @@
+from typing import Tuple
+
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 import open3d
 from sklearn.metrics import ConfusionMatrixDisplay
 import torch
-from torchmetrics import ConfusionMatrix
 from torchtyping import TensorType
 
 
@@ -81,12 +82,27 @@ def draw_fracture_result(
 
 
 def draw_positive_voxels(
-    volume: TensorType['D', 'H', 'W', torch.bool],
+    *volumes: Tuple[TensorType['D', 'H', 'W', torch.bool], ...],
 ) -> None:
-    pos_voxel_idxs = volume.nonzero().float().cpu().numpy()
-    colors = np.tile([50, 50, 50], (pos_voxel_idxs.shape[0], 1))
+    pos_voxel_idxs = [v.nonzero().float().cpu().numpy() for v in volumes]
 
-    visualize(pos_voxel_idxs, colors)
+    max_x_range = 0
+    for voxel_idxs in pos_voxel_idxs:
+        if not voxel_idxs.size:
+            continue
+
+        x_range = voxel_idxs[:, 0].max() - voxel_idxs[:, 0].min()
+        max_x_range = max(max_x_range, x_range)
+
+    pos_points = np.zeros((0, 3))
+    for i, points in enumerate(pos_voxel_idxs):
+        points[:, 0] -= 1.5 * i * max_x_range
+
+        pos_points = np.concatenate((pos_points, points))
+    
+    colors = np.tile([50, 50, 50], (pos_points.shape[0], 1))
+
+    visualize(pos_points, colors)
 
 
 def draw_confusion_matrix(
