@@ -27,6 +27,7 @@ def filter_connected_components(
     coords: TensorType['D', 'H', 'W', 3, torch.float32],
     seg: TensorType['D', 'H', 'W', torch.float32],
     conf_thresh: float=0.5,
+    max_dist: float=2.0,
 ) -> TensorType['D', 'H', 'W', torch.bool]:
     # determine connected components in volume
     labels = (seg >= conf_thresh).long()
@@ -47,17 +48,17 @@ def filter_connected_components(
         src=seg.flatten(),
         index=component_idxs.flatten(),
     )
-    prob_mask = component_probs >= 0.6
+    prob_mask = component_probs >= conf_thresh
 
     # determine components within two variance of centroid
     coords[..., 0] -= 1  # left-right symmetry
-    component_coords = scatter_mean(
+    component_centroids = scatter_mean(
         src=coords.reshape(-1, 3),
         index=component_idxs.flatten(),
         dim=0,
     )
-    component_dists = torch.sum(component_coords ** 2, dim=1)
-    dist_mask = component_dists < 4
+    component_dists = torch.sum(component_centroids ** 2, dim=1)
+    dist_mask = component_dists < max_dist
 
     # project masks back to volume
     component_mask = count_mask & prob_mask & dist_mask
@@ -77,6 +78,7 @@ class MandibleSegModule(pl.LightningModule):
         focal_loss: bool,
         dice_loss: bool,
         x_axis_flip: bool,
+        distance_filter: bool,
         batch_size: int=0,
         **model_cfg: Dict[str, Any],
     ) -> None:
@@ -91,6 +93,7 @@ class MandibleSegModule(pl.LightningModule):
         self.warmup_epochs = warmup_epochs
         self.weight_decay = weight_decay
         self.x_axis_flip = x_axis_flip
+        self.max_dist = 2.0 if distance_filter else float('inf')
         self.batch_size = batch_size
 
     def forward(
@@ -246,7 +249,11 @@ class MandibleSegModule(pl.LightningModule):
         coords, seg = self.predict_volumes(features, patch_idxs)
 
         # remove small or low-confidence connected components
-        volume_mask = filter_connected_components(coords, seg)
+        volume_mask = filter_connected_components(
+            coords,
+            seg,
+            max_dist=self.max_dist,
+        )
 
         # fill volume with original shape given foreground mask
         out = fill_source_volume(volume_mask, affine, shape)

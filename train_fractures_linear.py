@@ -15,7 +15,7 @@ def train():
 
     dm = JawFracDataModule(
         linear=True,
-        displacements=True,
+        displacements=False,
         seed=config['seed'],
         **config['datamodule'],
     )

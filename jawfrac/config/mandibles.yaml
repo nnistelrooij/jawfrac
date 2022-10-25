@@ -1,5 +1,5 @@
 work_dir: '/home/mka3dlab/Documents/logs/mandibles'
-version: 100
+version: 101
 seed: 0
 
 model:
@@ -14,11 +14,12 @@ model:
   focal_loss: False
   dice_loss: False
   x_axis_flip: True
+  distance_filter: True
 
 datamodule:
   # root: '/mnt/diag/nielsvannistelrooij/Fabian'
   root: '/home/mka3dlab/Documents/fractures'
-  regex_filter: 'Controls'
+  regex_filter: 'Annotation UK/17/'
   val_size: 0.2
   test_size: 0.0
   batch_size: 40

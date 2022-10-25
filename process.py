@@ -20,6 +20,7 @@ def infer_mandible():
     model = MandibleSegModule.load_from_checkpoint(
         'checkpoints/mandibles.ckpt',
         num_classes=dm.num_classes,
+        batch_size=config['datamodule']['batch_size'],
         **config['model'],
     )
 
@@ -54,6 +55,7 @@ def infer_fractures():
     model = LinearDisplacedJawFracModule.load_from_checkpoint(
         'checkpoints/old_fractures_linear_displaced_patch_size=64.ckpt',
         num_classes=dm.num_classes,
+        batch_size=config['datamodule']['batch_size'],
         **config['model'],
     )
 

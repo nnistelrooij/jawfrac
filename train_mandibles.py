@@ -38,12 +38,12 @@ def train():
         filename='weights-{epoch:02d}',
     )
     loss_checkpoint_callback = ModelCheckpoint(
-        save_top_k=3,
+        save_top_k=10,
         monitor='loss/val',
         filename='weights-{epoch:02d}',
     )
     metric_checkpoint_callback = ModelCheckpoint(
-        save_top_k=3,
+        save_top_k=10,
         monitor='f1/val',
         mode='max',
         filename='weights-{epoch:02d}',

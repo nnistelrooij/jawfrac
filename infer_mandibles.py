@@ -44,7 +44,7 @@ def infer():
         # save to storage
         volume = volume.cpu().numpy().astype(np.uint16)
         img = nibabel.Nifti1Image(volume, affine)
-        nibabel.save(img, path.parent / 'mandible2.nii.gz')
+        nibabel.save(img, path.parent / 'mandible200.nii.gz')
 
 
 if __name__ == '__main__':

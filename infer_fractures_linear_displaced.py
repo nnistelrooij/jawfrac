@@ -46,7 +46,7 @@ def infer():
 
         img = nibabel.load(path)
         file = path.parent / 'frac_pred.nii.gz'
-        img = nibabel.Nifti1Image(label, img.affine)
+        img = nibabel.Nifti1Image(pred.cpu().numpy().astype(np.uint16), img.affine)
         nibabel.save(img, file)
 
 

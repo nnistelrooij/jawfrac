@@ -63,7 +63,11 @@ class JawFracDataModule(VolumeDataModule):
         patient_files = [f for f in files if 'Controls' not in str(f)]
         control_files = [f for f in files if 'Controls' in str(f)]
 
-        df = pd.read_csv(self.root / 'Sophie overview 2.0.csv')
+        overview_file = self.root / 'Sophie overview 2.0.csv'
+        if not overview_file.exists():
+            return patient_files + control_files
+
+        df = pd.read_csv(overview_file)
         mask = df['Note'].isna() & (
             (getattr(self, 'displacements', True) & df['Displaced'])
             |
@@ -82,7 +86,7 @@ class JawFracDataModule(VolumeDataModule):
         if not isinstance(self, JawFracDataModule):
             return list(zip(scan_files))
 
-        mandible_files = self._filter_files('**/mandible2.nii.gz')
+        mandible_files = self._filter_files('**/mandible200.nii.gz')
 
         if stage == 'predict':
             return list(zip(scan_files, mandible_files))
@@ -107,7 +111,19 @@ class JawFracDataModule(VolumeDataModule):
 
         patient_files = self._split_patients(files)
         control_files = self._split_controls(files)
+        
+        control_files = (
+            control_files[0],
+            control_files[1][:len(patient_files[1])],
+            control_files[2][:len(patient_files[2])],
+        )
+
         files = [pfs + cfs for pfs, cfs in zip(patient_files, control_files)]
+
+        for key, fs in zip(['train', 'val', 'test'], files):
+            dirs = '\n'.join([fs[0].parent.stem for fs in fs])
+            with open(self.root / f'{key}.txt', 'w') as f:
+                f.write(dirs + '\n')
 
         return tuple(files)
 
@@ -177,7 +193,6 @@ class JawFracDataModule(VolumeDataModule):
         List[Tuple[Path, ...]],
         List[Tuple[Path, ...]],
     ]:
-        patient_files = [fs for fs in files if 'Controls' not in str(fs[0])]
         control_files = [fs for fs in files if 'Controls' in str(fs[0])]
         if not control_files:
             return [], [], []
@@ -269,7 +284,7 @@ class JawFracDataModule(VolumeDataModule):
 
             self.predict_dataset = JawFracDataset(
                 stage='predict',
-                files=non_frac_files[:1],
+                files=all_files[:1],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )

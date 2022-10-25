@@ -179,16 +179,29 @@ def fill_source_volume(
     )
     orig_voxels = orig_voxels[:, :3].round().long()
     orig_voxels = orig_voxels.clip(torch.zeros_like(shape), shape - 1)
+    orig_voxels = orig_voxels.cpu().numpy()
 
     # initialize empty volume and fill with binary segmentation
-    out = torch.zeros(shape.tolist(), dtype=torch.bool)
+    out = np.zeros(shape.tolist(), dtype=bool)
     out[tuple(orig_voxels.T)] = True
 
     # dilate volume to fill empty space between foreground voxels
-    out = ndimage.binary_dilation(
-        input=out,
-        structure=ndimage.generate_binary_structure(3, 1),
-        iterations=1,
-    )
+    spacing = affine[:, :3].sum(dim=0).abs()
+    for i, dim in enumerate(spacing):
+        if dim > 1 or torch.isclose(dim, torch.ones_like(dim)):
+            continue
+
+        iterations = torch.ceil(1 / dim).long().item() - 1
+
+        structure = np.zeros((3, 3, 3), dtype=bool)
+        structure[1 - (i == 0), 1 - (i == 1), 1 - (i == 2)] = True
+        structure[1, 1, 1] = True
+        structure[1 + (i == 0), 1 + (i == 1), 1 + (i == 2)] = True
+
+        out = ndimage.binary_dilation(
+            input=out,
+            structure=structure,
+            iterations=iterations,
+        )
 
     return torch.from_numpy(out).to(volume_mask)
