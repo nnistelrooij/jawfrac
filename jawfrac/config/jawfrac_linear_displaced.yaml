@@ -11,7 +11,7 @@ model:
     num_awms: 3
     backbone: 'conv'
     channels_list: [16, 32, 64, 128]
-    checkpoint_path: 'checkpoints/mandibles.ckpt'
+    checkpoint_path: ''
     head_kernel_size: 1
     return_features: True
   second_stage:
@@ -22,7 +22,7 @@ model:
     head_kernel_size: 1
     return_features: False
     cascade: True
-    checkpoint_path: 'checkpoints/fractures_linear.ckpt'
+    checkpoint_path: ''
   third_stage:
     num_awms: 0
     dropout: False
@@ -33,21 +33,20 @@ model:
   post_processing:
     max_dist: 17.32  # 4 mm; sqrt(3 * (mm / regular_spacing) ** 2)
     linear_conf_threshold: 0.2
-    linear_min_component_size: 2048
+    linear_min_component_size: 2560
     displaced_conf_threshold: 0.9
     displaced_min_component_size: 24_000
     mean_conf_threshold: 0.55
-    mean_min_component_size: 2048
-    verbose: False
+    mean_min_component_size: 2560
+    verbose: True
 
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'
-  root: '/home/mka3dlab/Documents/fractures'
   # root: '/mnt/diag/nielsvannistelrooij/fractures'
-  regex_filter: 'Annotation UK/17/'
+  regex_filter: 'Annotation UK'
   val_size: 0.2
   test_size: 0.2
-  batch_size: 40
+  batch_size: 24
   num_workers: 1
   pin_memory: True
   persistent_workers: True
@@ -68,4 +67,4 @@ datamodule:
   class_label_to_idx: [0, 1, 1]
   ignore_outside: True
 
-accumulate_grad_batches: 2
+accumulate_grad_batches: 1

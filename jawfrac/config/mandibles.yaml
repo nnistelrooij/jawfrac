@@ -19,7 +19,7 @@ model:
 datamodule:
   # root: '/mnt/diag/nielsvannistelrooij/Fabian'
   root: '/home/mka3dlab/Documents/fractures'
-  regex_filter: 'Annotation UK/17/'
+  regex_filter: 'Annotation UK'
   val_size: 0.2
   test_size: 0.0
   batch_size: 40

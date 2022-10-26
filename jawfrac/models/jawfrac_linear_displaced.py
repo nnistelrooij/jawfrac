@@ -27,7 +27,7 @@ from jawfrac.visualization import (
 )
 
 
-def combine_linear_displaced_components(
+def combine_linear_displaced_predictions(
     mandible: TensorType['D', 'H', 'W', torch.bool],
     linear: TensorType['D', 'H', 'W', torch.float32],
     displaced: TensorType['D', 'H', 'W', torch.float32],
@@ -277,7 +277,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         # predict binary segmentations
         linear, displaced = self.predict_volumes(features, patch_idxs)
         
-        mask = combine_linear_displaced_components(
+        mask = combine_linear_displaced_predictions(
             mandible, linear, displaced, **self.post_processing,
         ) > 0
 
@@ -334,7 +334,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         linear, displaced = self.predict_volumes(features, patch_idxs)
 
         # filter small connected components
-        mask = combine_linear_displaced_components(
+        mask = combine_linear_displaced_predictions(
             mandible, linear, displaced, **self.post_processing,
         ) > 0
 

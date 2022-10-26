@@ -13,12 +13,10 @@ class FracRecall(Metric):
     def __init__(
         self,
         iou_thresh: float=0.1,
-        max_neighbor_dist: float=10.0,
     ):
         super().__init__()
 
         self.iou_thresh = iou_thresh
-        self.max_neighbor_dist = max_neighbor_dist
         
         self.add_state('pos', default=torch.tensor(0), dist_reduce_fx='sum')
         self.add_state('total', default=torch.tensor(0), dist_reduce_fx='sum')

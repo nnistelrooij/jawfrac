@@ -11,7 +11,7 @@ model:
     num_awms: 3
     backbone: 'conv'
     channels_list: [16, 32, 64, 128]
-    checkpoint_path: 'checkpoints/mandibles.ckpt'
+    checkpoint_path: ''
     head_kernel_size: 1
     return_features: True
   second_stage:
@@ -24,7 +24,7 @@ model:
   focal_loss: False
   dice_loss: False
   conf_threshold: 0.2
-  min_component_size: 2048
+  min_component_size: 2560
 
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'
@@ -37,12 +37,12 @@ datamodule:
   pin_memory: True
   persistent_workers: True
   mandible_crop:
-    padding: 0.0  # mm
-    extend: False
+    padding: 10.0  # mm
+    extend: True
   regular_spacing: 0.4  # mm
   haar_transform: False
   patch_size: 64
-  stride: 48
+  stride: 24
   expand_label:
     bone_iters: 1
     all_iters: 1

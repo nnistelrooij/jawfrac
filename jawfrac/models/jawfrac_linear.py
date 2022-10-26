@@ -53,7 +53,7 @@ def filter_connected_components(
         index=component_idxs.flatten(),
     )
     print(seg.amax())
-    prob_mask = component_probs >= conf_thresh
+    prob_mask = component_probs >= 0.5
 
     # determine components within max_dist voxels of mandible
     voxels = torch.cartesian_prod(*[torch.arange(d) for d in seg.shape]).to(seg)
@@ -67,7 +67,7 @@ def filter_connected_components(
     nbrs.fit(mandible.nonzero().cpu())
     component_dists, _ = nbrs.kneighbors(component_centroids.cpu())
     component_dists = torch.from_numpy(component_dists[:, 0]).to(seg)
-    dist_mask = component_dists <= max_dist
+    dist_mask = component_dists < max_dist
 
     # remove connected components and make their indices consecutive
     component_mask = count_mask & prob_mask & dist_mask
@@ -194,7 +194,17 @@ class LinearJawFracModule(pl.LightningModule):
         mask_pred = next(mask_generator)
 
         # run the model and aggregate its predictions
-        for masks in batch_forward(self, features, patch_idxs):
+        batches = batch_forward(
+            model=self,
+            features=features,
+            patch_idxs=patch_idxs,
+            x_axis_flip=True,
+            batch_size=32,
+        )
+        for masks in batches:
+            if isinstance(masks, tuple):
+                masks = masks[1]
+
             for mask in masks:
                 mask_pred -= mask_pred
                 mask_pred += mask

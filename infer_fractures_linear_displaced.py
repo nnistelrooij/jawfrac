@@ -24,7 +24,7 @@ def infer():
     )
 
     model = LinearDisplacedJawFracModule.load_from_checkpoint(
-        'checkpoints/old_fractures_linear_displaced_patch_size=64.ckpt',
+        'checkpoints/fractures_linear_displaced.ckpt',
         num_classes=dm.num_classes,
         batch_size=batch_size,
         **config['model'],
@@ -35,7 +35,7 @@ def infer():
         devices=1,
         max_epochs=config['model']['epochs'],
     )
-    preds = trainer.predict(model, datamodule=dm)
+    preds = trainer.test(model, datamodule=dm)
 
     for i, pred in enumerate(tqdm(preds)):
         path = dm.root / dm.predict_dataset.files[i][0]
