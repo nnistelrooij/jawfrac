@@ -553,31 +553,30 @@ class ExpandLabel:
         unique_labels = np.unique(labels)
 
         if self.bone_iters:
-            for label in unique_labels[1:]:
-                dilation = ndimage.binary_dilation(
-                    input=labels == label,
-                    structure=ndimage.generate_binary_structure(3, 2),
-                    iterations=self.bone_iters,
-                    mask=intensities >= self.bone_intensity_thresh,
-                )
-                labels[dilation] = label
+            dilation = ndimage.binary_dilation(
+                input=labels == 1,
+                structure=ndimage.generate_binary_structure(3, 2),
+                iterations=self.bone_iters,
+                mask=intensities >= self.bone_intensity_thresh,
+            )
+            labels[dilation] = 1
 
         if self.all_iters:
-            for label in unique_labels[1:]:
-                dilation = ndimage.binary_dilation(
-                    input=labels == label,
-                    structure=ndimage.generate_binary_structure(3, 2),
-                    iterations=self.all_iters,
-                )
-                labels[dilation] = label
+            dilation = ndimage.binary_dilation(
+                input=labels == 1,
+                structure=ndimage.generate_binary_structure(3, 2),
+                iterations=self.all_iters,
+            )
+            labels[dilation] = 1
 
         if self.negative_iters:
+            frac_mask = np.any(labels[..., None] == np.array([1, 2]), axis=-1)
             dilation = ndimage.binary_dilation(
-                input=labels,
+                input=frac_mask,
                 structure=ndimage.generate_binary_structure(3, 2),
                 iterations=self.negative_iters,
             )
-            labels[(labels == 0) & dilation] = -1
+            labels[~frac_mask & dilation] = -1
 
         labels = labels.astype(np.float32)
         if self.smooth:
@@ -585,7 +584,8 @@ class ExpandLabel:
                 input=(labels == 1).astype(np.float32),
                 sigma=self.smooth,
             )
-            labels[blur > 0] = blur[blur > 0]
+            clip_mask = (0 < blur) & (blur <= 1)
+            labels[clip_mask] = blur[clip_mask]
 
         data_dict['intensities'] = intensities
         data_dict['labels'] = labels
@@ -599,6 +599,89 @@ class ExpandLabel:
             f'    bone_intensity_threshold={self.bone_intensity_thresh},',
             f'    all_iters={self.all_iters},',
             f'    smooth={self.smooth},',
+            ')',
+        ])
+
+
+class FractureCentroids:
+
+    def __init__(
+        self,
+        conf_thresh: float=0.1,
+        voxel_thresh: int=1000,
+    ) -> None:
+        self.conf_thresh = conf_thresh
+        self.voxel_thresh = voxel_thresh
+
+    def __call__(
+        self,
+        labels: NDArray[Any],
+        **data_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        centroids = []
+
+        # determine centroids of linear fractures
+        linear_labels, _ = ndimage.label(
+            input=(self.conf_thresh <= labels) & (labels < 2),
+            structure=ndimage.generate_binary_structure(3, 1),
+        )
+
+        # remove components with < 1000 voxels
+        unique, inverse, counts = np.unique(
+            linear_labels, return_inverse=True, return_counts=True,
+        )
+        small_mask = (counts < self.voxel_thresh)[inverse]
+        linear_labels[small_mask.reshape(linear_labels.shape)] = 0
+        
+        # linear centroid is voxel centroid
+        for label in unique[1:]:
+            voxels = np.column_stack(np.nonzero(linear_labels == label))
+            centroids.append(voxels.mean(axis=0))
+
+        # determine connected components of displaced fractures
+        displaced_labels, _ = ndimage.label(
+            input=labels == 2,
+            structure=ndimage.generate_binary_structure(3, 1),
+        )
+
+        # remove components with < 1000 voxels
+        unique, inverse, counts = np.unique(
+            displaced_labels, return_inverse=True, return_counts=True,
+        )
+        small_mask = (counts < self.voxel_thresh)[inverse]
+        displaced_labels[small_mask.reshape(displaced_labels.shape)] = 0
+
+        # displaced centroid is closest mandible voxel from annotation centroid
+        mandible_voxels = np.column_stack(np.nonzero(labels == 3))
+        for label in unique[1:]:
+            frac_voxels = np.column_stack(np.nonzero(displaced_labels == label))
+            frac_centroid = frac_voxels.mean(axis=0)
+
+            if mandible_voxels.shape[0] == 0:
+                centroids.append(frac_centroid)
+                continue
+
+            
+            dists = np.sum((mandible_voxels - frac_centroid) ** 2, axis=1)
+            mandible_centroid = mandible_voxels[dists < 50 ** 2].mean(axis=0)
+
+            # pick closest fracture voxel
+            dists = np.sum((frac_voxels - mandible_centroid) ** 2, axis=1)
+            if dists.min() < 50 ** 2:
+                frac_centroid = frac_voxels[np.argmin(dists)]
+
+            centroids.append(frac_centroid)
+
+        data_dict['labels'] = labels
+        data_dict['centroids'] = np.stack(centroids).astype(float)
+
+        return data_dict
+        
+    def __repr__(self) -> str:
+        return '\n'.join([
+            self.__class__.__name__ + '(',
+            f'    conf_thresh={self.conf_thresh},',
+            f'    voxel_thresh={self.voxel_thresh},',
             ')',
         ])
 
@@ -620,7 +703,7 @@ class NegativeIndices:
             patch = labels[slices]
             
             # save patch without foreground voxels
-            patch_classes[i] = -1 * np.any(patch)
+            patch_classes[i] = -1 * np.any((0 < patch) & (patch <= 2))
 
         data_dict['labels'] = labels
         data_dict['patch_classes'] = patch_classes

@@ -91,7 +91,7 @@ class JawFracDataModule(VolumeDataModule):
         if stage == 'predict':
             return list(zip(scan_files, mandible_files))
 
-        frac_files = self._filter_files('**/label.nii.gz')
+        frac_files = self._filter_files('**/label2.nii.gz')
 
         return list(zip(scan_files, mandible_files, frac_files))
 
@@ -262,7 +262,7 @@ class JawFracDataModule(VolumeDataModule):
 
             self.test_dataset = JawFracDataset(
                 stage='test',
-                files=files,
+                files=files[9:],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )
@@ -335,13 +335,15 @@ class JawFracDataModule(VolumeDataModule):
         TensorType['D', 'H', 'W', torch.bool],
         TensorType['P', 3, 2, torch.int64],
         TensorType['D', 'H', 'W', torch.float32],
+        TensorType['F', 3, torch.float32],
     ]:
         features = batch[0]['features']
         mandible = batch[0]['mandible']
         patch_idxs = batch[0]['patch_idxs']
         labels = batch[0]['labels']
+        centroids = batch[0]['centroids']
         
-        return features, mandible, patch_idxs, labels
+        return features, mandible, patch_idxs, labels, centroids
 
     def predict_collate_fn(
         self,

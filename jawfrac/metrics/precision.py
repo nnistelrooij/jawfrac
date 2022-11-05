@@ -9,22 +9,19 @@ class FracPrecision(FracRecall):
     def update(
         self,
         pred: TensorType['D', 'H', 'W', torch.bool],
-        target: TensorType['D', 'H', 'W', torch.int64],
+        targets: TensorType['F', 3, torch.float32],
     ) -> None:
         if not torch.any(pred):
             return
 
-        pred_voxels = self.cluster_voxels(pred)
-        self.total += len(pred_voxels)
+        dists = self.compute_distances(pred, targets)
 
-        if not torch.any(target):
+        self.total += dists.shape[0]
+
+        if dists.shape[1] == 0:
             return
-
-        target_voxels = self.cluster_voxels(target)
-        
-        ious = self.compute_ious(pred_voxels, target_voxels)
     
-        self.pos += torch.sum(ious.amax(dim=1) >= self.iou_thresh)
+        self.pos += torch.sum(dists.amin(dim=1) < self.dist_thresh)
 
     def compute(self) -> TensorType[torch.float32]:
         return self.pos / (self.total + 1e-6)

@@ -61,10 +61,13 @@ def combine_linear_displaced_predictions(
 
     # add components only present in segmentation volume
     for i in range(1, linear.max() + 1):
-        if torch.any(out[linear == i]):
+        if not torch.any(out[linear == i]):
             continue
 
-        out[linear == i] = out.max() + 1
+        labels = torch.unique(out[linear == i])
+        label = labels[labels > 0][0]
+        out[out == label] = 0
+        out[linear == i] = label
     
     # add components only present in interpolation volume
     for i in range(1, displaced.max() + 1):
@@ -263,6 +266,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             TensorType['D', 'H', 'W', torch.bool],
             TensorType['P', 3, 2, torch.int64],
             TensorType['D', 'H', 'W', torch.float32],
+            TensorType['F', 3, torch.float32],
         ],
         batch_idx: int,
     ) -> Tuple[
@@ -272,7 +276,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         files = self.trainer.datamodule.test_dataset.files[batch_idx]
         print(files[0].parent.stem)
 
-        features, mandible, patch_idxs, target = batch
+        features, mandible, patch_idxs, target, centroids = batch
 
         # predict binary segmentations
         linear, displaced = self.predict_volumes(features, patch_idxs)
@@ -289,12 +293,16 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             torch.any(mask)[None].long(),
             torch.any(target > 0)[None].long(),
         )
+
+
+        
+        target = (self.conf_thresh <= target) & (target < 2)
         self.f1_2(
             mask.long().flatten(),
             (target >= self.conf_thresh).long().flatten(),
         )
-        self.precision_metric(mask, target >= self.conf_thresh)
-        self.recall_metric(mask, target >= self.conf_thresh)
+        self.precision_metric(mask, centroids)
+        self.recall_metric(mask, centroids)
         
         # log metrics
         self.log('f1/test', self.f1_2)

@@ -1,4 +1,4 @@
-work_dir: '/home/mka3dlab/Documents/logs/fractures'
+work_dir: '/mnt/d/nielsvannistelrooij/logs'
 version: 303
 seed: 0
 
@@ -32,16 +32,16 @@ model:
   x_axis_flip: True
   post_processing:
     max_dist: 17.32  # 4 mm; sqrt(3 * (mm / regular_spacing) ** 2)
-    linear_conf_threshold: 0.2
-    linear_min_component_size: 2560
-    displaced_conf_threshold: 0.9
-    displaced_min_component_size: 24_000
-    mean_conf_threshold: 0.55
-    mean_min_component_size: 2560
+    linear_conf_threshold: 0.1
+    linear_min_component_size: 3072
+    displaced_conf_threshold: 0.95
+    displaced_min_component_size: 32_000
+    mean_conf_threshold: 0.5
+    mean_min_component_size: 3072
     verbose: True
 
 datamodule:
-  root: '/home/mka3dlab/Documents/fractures'
+  root: '/mnt/d/nielsvannistelrooij/fractures'
   # root: '/mnt/diag/nielsvannistelrooij/fractures'
   regex_filter: 'Annotation UK'
   val_size: 0.2

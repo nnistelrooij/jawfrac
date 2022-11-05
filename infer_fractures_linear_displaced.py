@@ -24,7 +24,7 @@ def infer():
     )
 
     model = LinearDisplacedJawFracModule.load_from_checkpoint(
-        'checkpoints/fractures_linear_displaced.ckpt',
+        'checkpoints/old_fractures_linear_displaced_patch_size=64.ckpt',
         num_classes=dm.num_classes,
         batch_size=batch_size,
         **config['model'],
