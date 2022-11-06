@@ -1,4 +1,5 @@
 work_dir: '/mnt/d/nielsvannistelrooij/logs'
+# work_dir: '/output'
 version: 303
 seed: 0
 
@@ -31,7 +32,7 @@ model:
     channels_list: [16, 32, 64, 128]
   x_axis_flip: True
   post_processing:
-    max_dist: 17.32  # 4 mm; sqrt(3 * (mm / regular_spacing) ** 2)
+    max_dist: 12.5  # 5 mm
     linear_conf_threshold: 0.1
     linear_min_component_size: 3072
     displaced_conf_threshold: 0.95
@@ -42,8 +43,9 @@ model:
 
 datamodule:
   root: '/mnt/d/nielsvannistelrooij/fractures'
+  # root: '/input'
   # root: '/mnt/diag/nielsvannistelrooij/fractures'
-  regex_filter: 'Annotation UK'
+  regex_filter: 'Annotation UK/125/'
   val_size: 0.2
   test_size: 0.2
   batch_size: 24

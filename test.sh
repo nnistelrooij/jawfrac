@@ -15,7 +15,7 @@ docker run --rm \
         --network="none" \
         --cap-drop="ALL" \
         --security-opt="no-new-privileges" \
-        --shm-size="128m" \
+        --shm-size="1024m" \
         --pids-limit="256" \
         --gpus="all" \
         -v $SCRIPTPATH/test:/input/ \
@@ -25,7 +25,7 @@ docker run --rm \
 docker run --rm \
         -v JawFracNet-output:/output/ \
         -v $SCRIPTPATH/test/:/input/ \
-        python:3.9-slim python3 -c "from pathlib import Path; assert Path('/output/frac.nii.gz').exists()"
+        python:3.9-slim python3 -c "from pathlib import Path; assert Path('/output/fractures.nii.gz').exists()"
 
 if [ $? -eq 0 ]; then
     echo "Tests successfully passed..."

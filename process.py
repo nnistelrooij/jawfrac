@@ -36,7 +36,7 @@ def infer_mandible():
     img = nibabel.load(file)
 
     img = nibabel.Nifti1Image(mask, img.affine)
-    nibabel.save(img, file.parent / 'mandible2.nii.gz')
+    nibabel.save(img, file.parent / 'mandible200.nii.gz')
 
 
 def infer_fractures():
@@ -53,7 +53,7 @@ def infer_fractures():
     )
     
     model = LinearDisplacedJawFracModule.load_from_checkpoint(
-        'checkpoints/fractures_linear_displaced.ckpt',
+        'checkpoints/fractures.ckpt',
         num_classes=dm.num_classes,
         batch_size=config['datamodule']['batch_size'],
         **config['model'],
@@ -71,7 +71,7 @@ def infer_fractures():
     img = nibabel.load(file)
 
     img = nibabel.Nifti1Image(mask, img.affine)
-    nibabel.save(img, file.parent / 'frac_pred.nii.gz')
+    nibabel.save(img, file.parent / 'fractures.nii.gz')
 
 
 if __name__ == '__main__':

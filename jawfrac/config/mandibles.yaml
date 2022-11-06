@@ -1,4 +1,5 @@
-work_dir: '/home/mka3dlab/Documents/logs/mandibles'
+work_dir: '/mnt/d/nielsvannistelrooij/logs'
+work_dir: '/output'
 version: 101
 seed: 0
 
@@ -18,8 +19,9 @@ model:
 
 datamodule:
   # root: '/mnt/diag/nielsvannistelrooij/Fabian'
-  root: '/home/mka3dlab/Documents/fractures'
-  regex_filter: 'Annotation UK'
+  root: '/mnt/d/nielsvannistelrooij/fractures'
+  root: '/input'
+  regex_filter: ''
   val_size: 0.2
   test_size: 0.0
   batch_size: 40

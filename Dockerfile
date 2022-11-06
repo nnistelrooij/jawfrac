@@ -25,5 +25,9 @@ ENV LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/opt/conda/lib/
 COPY --chown=algorithm:algorithm jawfrac/ jawfrac/
 COPY --chown=algorithm:algorithm process.py .
 
+# copy checkpoints
+COPY --chown=algorithm:algorithm checkpoints/mandibles.ckpt checkpoints/mandibles.ckpt
+COPY --chown=algorithm:algorithm checkpoints/old_fractures_linear_displaced_patch_size=64.ckpt checkpoints/fractures.ckpt
+
 # script to run
 ENTRYPOINT ["python", "/opt/algorithm/process.py"]

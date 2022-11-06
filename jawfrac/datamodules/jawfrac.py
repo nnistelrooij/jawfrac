@@ -91,7 +91,7 @@ class JawFracDataModule(VolumeDataModule):
         if stage == 'predict':
             return list(zip(scan_files, mandible_files))
 
-        frac_files = self._filter_files('**/label2.nii.gz')
+        frac_files = self._filter_files('**/label.nii.gz')
 
         return list(zip(scan_files, mandible_files, frac_files))
 
@@ -258,11 +258,11 @@ class JawFracDataModule(VolumeDataModule):
 
         if stage is None or stage =='test':
             files = self._files('test')
-            _, files, _ = self._split(files)
+            _, _, files = self._split(files)
 
             self.test_dataset = JawFracDataset(
                 stage='test',
-                files=files[9:],
+                files=files,
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )
@@ -272,19 +272,15 @@ class JawFracDataModule(VolumeDataModule):
 
             non_frac_files = []
             for files in all_files:
-                frac_file = self.root / files[0].parent / 'frac_pred.nii.gz'
+                frac_file = self.root / files[0].parent / 'frac_pred2.nii.gz'
                 if frac_file.exists():
-                    continue
-
-                label_file = self.root / files[0].parent / 'label.nii.gz'
-                if not label_file.exists():
                     continue
                 
                 non_frac_files.append(files)
 
             self.predict_dataset = JawFracDataset(
                 stage='predict',
-                files=all_files[:1],
+                files=non_frac_files[:1],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )
@@ -335,15 +331,13 @@ class JawFracDataModule(VolumeDataModule):
         TensorType['D', 'H', 'W', torch.bool],
         TensorType['P', 3, 2, torch.int64],
         TensorType['D', 'H', 'W', torch.float32],
-        TensorType['F', 3, torch.float32],
     ]:
         features = batch[0]['features']
         mandible = batch[0]['mandible']
         patch_idxs = batch[0]['patch_idxs']
         labels = batch[0]['labels']
-        centroids = batch[0]['centroids']
         
-        return features, mandible, patch_idxs, labels, centroids
+        return features, mandible, patch_idxs, labels
 
     def predict_collate_fn(
         self,

@@ -25,7 +25,7 @@ class MandibleSegDataModule(VolumeDataModule):
         **dm_cfg: Dict[str, Any],
     ) -> None:
         # use files functions from JawFrac when inferring for fracture data
-        if 'fractures' in str(root):
+        if 'fractures' in str(root) or str(root) == '/input':
             self._files = partial(JawFracDataModule._files, self)
             self._filter_files = partial(JawFracDataModule._filter_files, self)
 
@@ -49,7 +49,11 @@ class MandibleSegDataModule(VolumeDataModule):
     def _filter_files(self, pattern: str) -> List[Path]:
         files = super()._filter_files(pattern)
         
-        df = pd.read_csv(self.root / 'Fabian overview.csv')
+        overview_file = self.root / 'Fabian overview.csv'
+        if not overview_file.exists():
+            return files
+
+        df = pd.read_csv(overview_file)
         df = df[pd.isna(df['Note']) & ~pd.isna(df['Complete'])]
         df = df[~df['Complete'].str.match(r'.*[,+]')]
         pseudonyms = df['Pseudonym'].tolist()
@@ -121,7 +125,7 @@ class MandibleSegDataModule(VolumeDataModule):
             
             non_mandible_files = []
             for files in all_files:
-                mandible_file = self.root / files[0].parent / 'mandible200.nii.gz'
+                mandible_file = self.root / files[0].parent / 'mandible_nov.nii.gz'
                 if mandible_file.exists():
                     continue
                 

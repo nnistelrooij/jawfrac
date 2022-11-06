@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 from scipy import ndimage
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
-from torchmetrics import ConfusionMatrix, F1Score
+from torchmetrics import ConfusionMatrix, F1Score, JaccardIndex
 from torchtyping import TensorType
 
 from jawfrac.metrics import FracPrecision, FracRecall
@@ -122,6 +122,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.confmat = ConfusionMatrix(num_classes=2)
         self.f1_1 = F1Score(num_classes=2, average='macro')
         self.f1_2 = F1Score(num_classes=2, average='macro')
+        self.iou = JaccardIndex(num_classes=2)
         self.precision_metric = FracPrecision()
         self.recall_metric = FracRecall()
 
@@ -266,7 +267,6 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             TensorType['D', 'H', 'W', torch.bool],
             TensorType['P', 3, 2, torch.int64],
             TensorType['D', 'H', 'W', torch.float32],
-            TensorType['F', 3, torch.float32],
         ],
         batch_idx: int,
     ) -> Tuple[
@@ -276,14 +276,15 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         files = self.trainer.datamodule.test_dataset.files[batch_idx]
         print(files[0].parent.stem)
 
-        features, mandible, patch_idxs, target, centroids = batch
+        features, mandible, patch_idxs, target = batch
 
         # predict binary segmentations
         linear, displaced = self.predict_volumes(features, patch_idxs)
         
-        mask = combine_linear_displaced_predictions(
+        components = combine_linear_displaced_predictions(
             mandible, linear, displaced, **self.post_processing,
-        ) > 0
+        )
+        mask = components > 0
 
         if self.verbose:
             draw_fracture_result(mandible, mask, target >= self.conf_thresh)
@@ -294,18 +295,24 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             torch.any(target > 0)[None].long(),
         )
 
+        self.precision_metric(mask, target >= self.conf_thresh)
+        self.recall_metric(mask, target >= self.conf_thresh)
 
-        
-        target = (self.conf_thresh <= target) & (target < 2)
-        self.f1_2(
+
+        for label in torch.unique(components)[1:]:
+            if not torch.any(target[components == label] == 2):
+                continue
+
+            components[components == label] = 0
+        mask = components > 0        
+        target = (self.conf_thresh <= target) & (target != 2)
+        self.iou(
             mask.long().flatten(),
-            (target >= self.conf_thresh).long().flatten(),
+            target.long().flatten(),
         )
-        self.precision_metric(mask, centroids)
-        self.recall_metric(mask, centroids)
         
         # log metrics
-        self.log('f1/test', self.f1_2)
+        self.log('iou/test', self.iou)
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall_metric)
 

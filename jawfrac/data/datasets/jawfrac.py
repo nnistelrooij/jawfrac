@@ -36,10 +36,7 @@ class JawFracDataset(VolumeDataset):
                 T.ExpandLabel(**expand_label),
                 T.NegativeIndices(),
             ) if stage == 'fit' else ()),
-            *((
-                T.ExpandLabel(**expand_label),
-                T.FractureCentroids(),
-            ) if stage == 'test' else ()),
+            T.ExpandLabel(**expand_label) if stage == 'test' else dict,
         )
 
         super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)
