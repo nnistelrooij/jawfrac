@@ -5,7 +5,8 @@ from scipy import ndimage
 from sklearn import neighbors
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
-from torchmetrics import ConfusionMatrix, F1Score
+from torchmetrics import ConfusionMatrix, F1Score, Dice
+from torchmetrics.classification import BinaryJaccardIndex
 from torchtyping import TensorType
 from torch_scatter import scatter_mean
 
@@ -110,6 +111,8 @@ class LinearJawFracModule(pl.LightningModule):
 
         self.confmat = ConfusionMatrix(num_classes=2)
         self.f1 = F1Score(num_classes=2, average='macro')
+        self.iou = BinaryJaccardIndex()
+        self.dice = Dice(multiclass=False)
         self.precision_metric = FracPrecision()
         self.recall_metric = FracRecall()
 
@@ -237,20 +240,22 @@ class LinearJawFracModule(pl.LightningModule):
             torch.any(mask)[None].long(),
             torch.any(target)[None].long(),
         )
-        self.f1(mask.long().flatten(), target.long().flatten())
+        self.iou(mask.long().flatten(), target.long().flatten())
+        self.dice(mask.long().flatten(), target.long().flatten())
         self.precision_metric(mask, target)
         self.recall_metric(mask, target)
         
         # log metrics
-        self.log('f1/test', self.f1)
+        self.log('iou/test', self.iou)
+        self.log('dice/test', self.dice)
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall_metric)
         
         # visualize results with Open3D
-        draw_fracture_result(mandible, mask, labels >= self.conf_thresh)
+        # draw_fracture_result(mandible, mask, labels >= self.conf_thresh)
 
     def test_epoch_end(self, _) -> None:
-        draw_confusion_matrix(self.confmat)
+        draw_confusion_matrix(self.confmat.compute())
 
     def predict_step(
         self,

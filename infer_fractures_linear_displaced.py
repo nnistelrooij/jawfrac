@@ -35,7 +35,7 @@ def infer():
         devices=1,
         max_epochs=config['model']['epochs'],
     )
-    preds = trainer.predict(model, datamodule=dm)
+    preds = trainer.test(model, datamodule=dm)
 
     for i, pred in enumerate(tqdm(preds)):
         path = dm.root / dm.predict_dataset.files[i][0]

@@ -1,4 +1,5 @@
 work_dir: '/home/mka3dlab/Documents/logs/fractures'
+work_dir: '/mnt/d/nielsvannistelrooij/logs'
 version: no_extend_volume
 seed: 0
 
@@ -28,6 +29,7 @@ model:
 
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'
+  root: '/mnt/d/nielsvannistelrooij/fractures'
   # root: '/mnt/diag/nielsvannistelrooij/fractures'
   regex_filter: 'Annotation UK'
   val_size: 0.2

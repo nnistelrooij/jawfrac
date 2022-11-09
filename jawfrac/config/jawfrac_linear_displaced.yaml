@@ -39,13 +39,13 @@ model:
     displaced_min_component_size: 32_000
     mean_conf_threshold: 0.5
     mean_min_component_size: 3072
-    verbose: True
+    verbose: False
 
 datamodule:
   root: '/mnt/d/nielsvannistelrooij/fractures'
   # root: '/input'
   # root: '/mnt/diag/nielsvannistelrooij/fractures'
-  regex_filter: 'Annotation UK/125/'
+  regex_filter: 'Annotation UK'
   val_size: 0.2
   test_size: 0.2
   batch_size: 24
