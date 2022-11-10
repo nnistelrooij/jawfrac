@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Tuple, Union
 
 import pytorch_lightning as pl
 from scipy import ndimage
-from sklearn import neighbors
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 from torchmetrics import ConfusionMatrix, F1Score, Dice
@@ -28,11 +27,9 @@ from jawfrac.visualization import (
 
 
 def filter_connected_components(
-    mandible: TensorType['D', 'H', 'W', torch.bool],
     seg: TensorType['D', 'H', 'W', torch.float32],
-    conf_thresh: float,
-    min_component_size: int,
-    max_dist: float=20.0,
+    conf_thresh: float=0.1,
+    min_component_size: int=200,
 ) -> TensorType['D', 'H', 'W', torch.int64]:
     # determine connected components in volume
     labels = (seg >= conf_thresh).long()
@@ -56,29 +53,15 @@ def filter_connected_components(
     print(seg.amax())
     prob_mask = component_probs >= 0.5
 
-    # determine components within max_dist voxels of mandible
-    voxels = torch.cartesian_prod(*[torch.arange(d) for d in seg.shape]).to(seg)
-    component_centroids = scatter_mean(
-        src=voxels.reshape(-1, 3),
-        index=component_idxs.flatten(),
-        dim=0,
-    )
-
-    nbrs = neighbors.NearestNeighbors(n_neighbors=1, n_jobs=-1)
-    nbrs.fit(mandible.nonzero().cpu())
-    component_dists, _ = nbrs.kneighbors(component_centroids.cpu())
-    component_dists = torch.from_numpy(component_dists[:, 0]).to(seg)
-    dist_mask = component_dists < max_dist
-
     # remove connected components and make their indices consecutive
-    component_mask = count_mask & prob_mask & dist_mask
+    component_mask = count_mask & prob_mask
     component_idxs[~component_mask[component_idxs]] = 0
     component_idxs = (component_mask.cumsum(dim=0))[component_idxs]
 
     return component_idxs
 
 
-class LinearJawFracModule(pl.LightningModule):
+class FracNet(pl.LightningModule):
 
     def __init__(
         self,
@@ -87,8 +70,6 @@ class LinearJawFracModule(pl.LightningModule):
         epochs: int,
         warmup_epochs: int,
         weight_decay: float,
-        first_stage: Dict[str, Any],
-        second_stage: Dict[str, Any],
         focal_loss: bool,
         dice_loss: bool,
         conf_threshold: float,
@@ -97,13 +78,9 @@ class LinearJawFracModule(pl.LightningModule):
     ) -> None:
         super().__init__()
 
-        self.mandible_net = nn.MandibleNet(
-            num_classes=1, **first_stage, **model_cfg,
-        )
         self.frac_net = nn.JawFracNet(
             num_classes=1,
-            mandible_channels=self.mandible_net.out_channels,
-            **second_stage,
+            mandible_channels=0,
             **model_cfg,
         )
 
@@ -133,8 +110,7 @@ class LinearJawFracModule(pl.LightningModule):
             TensorType['B', 'D', 'H', 'W', torch.float32],
         ],
     ]:
-        coords, mandible = self.mandible_net(x)
-        seg = self.frac_net(x, coords, mandible)
+        seg = self.frac_net(x, None, x[:, :1])
 
         return seg
 
@@ -252,7 +228,7 @@ class LinearJawFracModule(pl.LightningModule):
         target = (self.conf_thresh <= target) & (target != 2)
         self.iou(mask.long().flatten(), target.long().flatten())
         self.dice(mask.long().flatten(), target.long().flatten())
-
+        
         # log metrics
         self.log('iou/test', self.iou)
         self.log('dice/test', self.dice)

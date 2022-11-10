@@ -1,3 +1,4 @@
+from jawfrac.models.fracnet import FracNet
 from jawfrac.models.jawfrac_linear import LinearJawFracModule
 from jawfrac.models.jawfrac_linear_displaced import LinearDisplacedJawFracModule
 from jawfrac.models.mandibles import MandibleSegModule

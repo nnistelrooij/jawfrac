@@ -1,2 +1,3 @@
+from jawfrac.datamodules.fracnet import FracNetDataModule
 from jawfrac.datamodules.jawfrac import JawFracDataModule
 from jawfrac.datamodules.mandibles import MandibleSegDataModule

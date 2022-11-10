@@ -8,12 +8,19 @@ from scipy import ndimage
 from jawfrac.visualization import visualize
 
 
-def wolla(path, threshold: int, min_voxels: int):
+def wolla(path, threshold: int, min_voxels: int, dilate: bool=False):
     img = nibabel.load(path)
 
     data = np.asarray(img.dataobj)
     affine = img.affine
     mask = data >= threshold
+
+    if dilate:
+        mask = ndimage.binary_dilation(
+            input=mask,
+            structure=ndimage.generate_binary_structure(3, 1),
+            iterations=1,
+        )
 
     labels, _ = ndimage.label(mask, ndimage.generate_binary_structure(3, 1))
     _, inverse, counts = np.unique(labels.flatten(), return_inverse=True, return_counts=True)
@@ -41,9 +48,10 @@ def visualize_input(path):
 
 
 def visualize_mandible(path, path2):
-    labels, points, colors = wolla(path, 130, 20_000)
-    mandible_labels, mandible_points, mandible_colors = wolla(path2, 1, 2000)
-    mandible_colors[:, 0] = 1 - mandible_colors[:, 0]
+    labels, points, colors = wolla(path, 500, 20_000)
+    mandible_labels, mandible_points, mandible_colors = wolla(path2, 1, 1000, True)
+    mandible_colors[:, 0] = 1
+    # mandible_colors[:, 0] = 1 - mandible_colors[:, 0]
     mandible_colors[:, 1:] = 0
 
     both_labels = np.concatenate((
@@ -84,14 +92,14 @@ def visualize_patch(path: Path):
     plt.show()
 
 
-def visualize_mandible_patch(path: Path):
+def visualize_mandible_patch(path: Path, path2,):
     img = nibabel.load(path)
 
     data = np.asarray(img.dataobj)
 
     data = ndimage.zoom(data, [1, 1, 2.5])
     
-    mandible = nibabel.load(path.parent / 'mandible3.nii.gz')
+    mandible = nibabel.load(path2)
 
     mandible = np.asarray(mandible.dataobj)
     mandible = ndimage.zoom(mandible, [1, 1, 2.5], output=float).round().astype(bool)
@@ -117,12 +125,80 @@ def visualize_mandible_patch(path: Path):
     plt.show()
 
 
+def visualize_expand_label():
+    root = Path('/mnt/d/Users/Niels-laptop/Downloads/fractures/')
+
+    scan_file = root / 'Patient17_main_image.nii.gz'
+    frac_file = root / 'Patient17_seg_normal.nii.gz'
+
+    img = nibabel.load(scan_file)
+    intensities = np.asarray(img.dataobj)
+    intensities = (intensities - intensities[intensities > 0].mean()) / 255 * 4096
+
+    print('start')
+    intensities = ndimage.zoom(
+        input=intensities,
+        zoom=[1, 1, 2.5],
+    )
+    print('interp 1')
+
+
+    img = nibabel.load(frac_file)
+    label = np.asarray(img.dataobj)
+    label = ndimage.zoom(
+        input=label,
+        zoom=[1, 1, 2.5],
+        output=float,
+    ).round().astype(bool)
+    print('interp 2')
+
+    out = ndimage.binary_dilation(
+        input=label,
+        structure=ndimage.generate_binary_structure(3, 2),
+        iterations=1,
+        mask=intensities >= 300
+    )
+    out = ndimage.binary_dilation(
+        input=out,
+        structure=ndimage.generate_binary_structure(3, 2),
+        iterations=1,
+    ).astype(np.float32)
+
+    out = ndimage.gaussian_filter(
+        input=out.astype(np.float32),
+        sigma=0.5,
+    )
+
+    out = ndimage.zoom(
+        input=out,
+        zoom=[1, 1, 0.4],
+    ) >= 0.2
+
+
+    # out = out.clip(0, 1)
+    # out = np.tile(out[:, :, 59], (3, 1, 1)).transpose(1, 2, 0)
+    # out[:, :, 1:] = 0
+    # plt.imshow(out)
+    # plt.axis('off')
+    # plt.savefig('/mnt/d/Users/Niels-laptop/Documents/Master Thesis/expand_label_3.png', bbox_inches='tight', pad_inches=0)
+    # plt.show()
+
+    out = out[:, :, :199].astype(np.uint16)
+
+    img = nibabel.Nifti1Image(out, img.affine)
+    nibabel.save(img, root / 'expand_label_bi.nii.gz')
+
+
+
 if __name__ == '__main__':
-    path = Path(r'C:\Users\Niels-laptop\Downloads\fractures\Patient17_main_image.nii.gz')
+    path = Path('/mnt/d/Users/Niels-laptop/Documents/Annotation UK/103/Patient103_main_image.nii.gz')
+    # path = Path(r'D:\')
     # visualize_input(path)
     # visualize_patch(path)
 
-    # visualize_mandible(path, path.parent / 'mandible3.nii.gz')
+    visualize_mandible(path, path.parent / 'mandible200.nii.gz')
     # visualize_mandible_patch(path)
 
-    visualize_mandible(path, path.parent / 'frac_pred2.nii.gz')
+    # visualize_mandible_patch(path, path.parent / 'frac_pred_linear.nii.gz')
+
+    # visualize_expand_label()

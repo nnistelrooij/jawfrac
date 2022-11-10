@@ -1,5 +1,5 @@
 work_dir: '/home/mka3dlab/Documents/logs/fractures'
-work_dir: '/mnt/d/nielsvannistelrooij/logs'
+work_dir: '/home/nielsje/logs'
 version: no_extend_volume
 seed: 0
 
@@ -7,29 +7,21 @@ model:
   lr: 0.002
   epochs: 500
   warmup_epochs: 20
-  weight_decay: 0.0
-  first_stage:
-    num_awms: 3
-    backbone: 'conv'
-    channels_list: [16, 32, 64, 128]
-    checkpoint_path: ''
-    head_kernel_size: 1
-    return_features: True
-  second_stage:
-    num_awms: 0
-    coords: ''
-    backbone: 'conv'
-    channels_list: [16, 32, 64, 128]
-    head_kernel_size: 1
-    cascade: True
+  weight_decay: 0.0  
+  num_awms: 0
+  coords: ''
+  backbone: 'conv'
+  channels_list: [16, 32, 64, 128]
+  head_kernel_size: 1
+  cascade: False
   focal_loss: False
-  dice_loss: False
+  dice_loss: True
   conf_threshold: 0.1
-  min_component_size: 3072
+  min_component_size: 200
 
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'
-  root: '/mnt/d/nielsvannistelrooij/fractures'
+  root: '/mnt/d/Users/Niels-laptop/Documents'
   # root: '/mnt/diag/nielsvannistelrooij/fractures'
   regex_filter: 'Annotation UK'
   val_size: 0.2
@@ -39,20 +31,18 @@ datamodule:
   pin_memory: True
   persistent_workers: True
   mandible_crop:
-    padding: 10.0  # mm
-    extend: True
+    padding: 0.0  # mm
+    extend: False
   regular_spacing: 0.4  # mm
   haar_transform: False
   patch_size: 64
-  stride: 24
+  stride: 48
   expand_label:
-    bone_iters: 1
-    all_iters: 1
-    smooth: 0.5
+    bone_iters: 0
+    all_iters: 0
+    smooth: 0.0
     negative_iters: 16
-  gamma_adjust: False
   max_patches_per_scan: 4
-  class_label_to_idx: [0, 1, 1]
   ignore_outside: False
 
 accumulate_grad_batches: 1

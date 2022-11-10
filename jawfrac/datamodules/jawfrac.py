@@ -140,7 +140,8 @@ class JawFracDataModule(VolumeDataModule):
             return [], [], []
 
         # take subsample of DataFrame comprised by given patient files
-        df = pd.read_csv(self.root / 'Sophie overview 2.0.csv')
+        overview_file = self.root / 'Sophie overview 2.0.csv'
+        df = pd.read_csv(overview_file)
         idxs = [int(fs[0].parent.stem) - 1 for fs in patient_files]
         df = df.iloc[idxs].reset_index()
 
@@ -251,8 +252,8 @@ class JawFracDataModule(VolumeDataModule):
 
             if self.trainer is not None: self.trainer.logger.log_hyperparams({
                 'pre_transform': str(self.train_dataset.pre_transform),
-                'train_transform': str(self.train_dataset.transform),
-                'val_transform': str(self.val_dataset.transform),
+                'train_transform': str(train_transforms),
+                'val_transform': str(val_transforms),
             })
 
 
