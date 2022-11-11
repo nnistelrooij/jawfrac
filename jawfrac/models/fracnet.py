@@ -81,6 +81,8 @@ class FracNet(pl.LightningModule):
         self.frac_net = nn.JawFracNet(
             num_classes=1,
             mandible_channels=0,
+            gapm_level=450.0,
+            gapm_width=1100.0,
             **model_cfg,
         )
 

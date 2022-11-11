@@ -941,12 +941,6 @@ class RelativePatchCoordinates:
 
 class IntensityAsFeatures:
 
-    def __init__(
-        self,
-        window: Optional[Tuple[int, int]]=None,
-    ) -> None:
-        self.window = window
-
     def __call__(
         self,
         intensities: NDArray[Any],
@@ -955,12 +949,6 @@ class IntensityAsFeatures:
         data_dict['intensities'] = intensities
 
         intensities = intensities.astype(float)
-        if self.window is not None:
-            low, high = self.window
-            intensities = intensities.clip(low, high)
-            intensities = (intensities - low) / (high - low)
-            intensities = intensities * 2 - 1
-
         if 'features' in data_dict:
             data_dict['features'] = np.concatenate(
                 (data_dict['features'], intensities[np.newaxis]),
@@ -971,11 +959,7 @@ class IntensityAsFeatures:
         return data_dict
 
     def __repr__(self) -> str:
-        return '\n'.join([
-            self.__class__.__name__ + '(',
-            f'    window={self.window},',
-            ')',
-        ])
+        self.__class__.__name__ + '()'
 
 
 class PositiveNegativePatches:

@@ -15,13 +15,12 @@ model:
   focal_loss: False
   dice_loss: False
   x_axis_flip: True
-  distance_filter: True
+  distance_filter: False
 
 datamodule:
   # root: '/mnt/diag/nielsvannistelrooij/Fabian'
   root: '/mnt/d/nielsvannistelrooij/fractures'
-  root: '/input'
-  regex_filter: ''
+  regex_filter: 'Annotation UK/89'
   val_size: 0.2
   test_size: 0.0
   batch_size: 40

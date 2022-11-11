@@ -19,13 +19,13 @@ def infer():
     config['datamodule']['batch_size'] = 1
     dm = JawFracDataModule(
         linear=True,
-        displacements=False,
+        displacements=True,
         seed=config['seed'],
         **config['datamodule'],
     )
 
     model = LinearJawFracModule.load_from_checkpoint(
-        'checkpoints/fractures_linear.ckpt',
+        'checkpoints/fractures_linear_no_cascade.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )

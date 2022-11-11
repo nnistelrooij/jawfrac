@@ -1,6 +1,5 @@
 import pytorch_lightning as pl
 import yaml
-import torch.nn as nn
 from tqdm import tqdm
 
 from jawfrac.datamodules import MandibleSegDataModule
@@ -19,14 +18,11 @@ def infer():
     )
 
     model = MandibleSegModule.load_from_checkpoint(
-        'checkpoints/mandibles.ckpt',
+        'checkpoints/mandibles_no_coords.ckpt',
         num_classes=dm.num_classes,
         batch_size=batch_size,
         **config['model'],
     )
-    for module in model.modules():
-        if isinstance(module, nn.BatchNorm3d):
-            module.track_running_stats = False
 
     trainer = pl.Trainer(
         accelerator='gpu',
@@ -44,7 +40,7 @@ def infer():
         # save to storage
         volume = volume.cpu().numpy().astype(np.uint16)
         img = nibabel.Nifti1Image(volume, affine)
-        nibabel.save(img, path.parent / 'mandible_nov.nii.gz')
+        nibabel.save(img, path.parent / 'mandible4.nii.gz')
 
 
 if __name__ == '__main__':

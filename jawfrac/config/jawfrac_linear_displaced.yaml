@@ -45,7 +45,7 @@ datamodule:
   root: '/mnt/d/nielsvannistelrooij/fractures'
   # root: '/input'
   # root: '/mnt/diag/nielsvannistelrooij/fractures'
-  regex_filter: 'Annotation UK'
+  regex_filter: ''
   val_size: 0.2
   test_size: 0.2
   batch_size: 24

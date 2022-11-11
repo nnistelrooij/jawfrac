@@ -86,7 +86,7 @@ class JawFracDataModule(VolumeDataModule):
         if not isinstance(self, JawFracDataModule):
             return list(zip(scan_files))
 
-        mandible_files = self._filter_files('**/mandible200.nii.gz')
+        mandible_files = self._filter_files('**/mandible2.nii.gz')
 
         if stage == 'predict':
             return list(zip(scan_files, mandible_files))

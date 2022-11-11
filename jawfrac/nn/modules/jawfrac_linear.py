@@ -22,6 +22,8 @@ class JawFracNet(nn.Module):
         coords: Optional[str],
         head_kernel_size: int,
         cascade: bool,
+        gapm_level: float=1036.0,
+        gapm_width: float=4120.0,
         return_features: bool=False,
         checkpoint_path: str='',
     ) -> None:
@@ -31,7 +33,9 @@ class JawFracNet(nn.Module):
             'Cannot combine swin backbone with sparse coordinates.'
         )
 
-        self.gapm = GrayscaleAdaptivePerceptionModule(num_awms)
+        self.gapm = GrayscaleAdaptivePerceptionModule(
+            num_awms, init_level=gapm_level, init_width=gapm_width,
+        )
         
         in_channels = 1 + num_awms + mandible_channels + 3 * ('dense' in coords)
 

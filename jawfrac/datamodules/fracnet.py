@@ -33,7 +33,7 @@ class FracNetDataModule(VolumeDataModule):
         )
 
         self.default_transforms = T.Compose(
-            T.IntensityAsFeatures(window=(-200, 1000)),
+            T.IntensityAsFeatures(),
             T.ToTensor(),
         )
 
@@ -64,7 +64,7 @@ class FracNetDataModule(VolumeDataModule):
 
             rng = np.random.default_rng(self.seed)
             val_transforms = T.Compose(
-                T.IntensityAsFeatures(window=(-200, 1000)),
+                T.IntensityAsFeatures(),
                 T.PositiveNegativePatches(
                     max_patches=self.max_patches_per_scan,
                     ignore_outside=False,

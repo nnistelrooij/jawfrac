@@ -5,7 +5,8 @@ import pytorch_lightning as pl
 from scipy import ndimage
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
-from torchmetrics import F1Score
+from torchmetrics import F1Score, Dice
+from torchmetrics.classification import BinaryJaccardIndex
 from torchtyping import TensorType
 from torch_scatter import scatter_mean
 
@@ -87,6 +88,8 @@ class MandibleSegModule(pl.LightningModule):
         self.model = nn.MandibleNet(**model_cfg)
         self.criterion = nn.MandibleLoss(focal_loss, dice_loss)
         self.f1 = F1Score(num_classes=2, average='macro')
+        self.iou = BinaryJaccardIndex()
+        self.dice = Dice(multiclass=False)
 
         self.lr = lr
         self.epochs = epochs
@@ -223,12 +226,14 @@ class MandibleSegModule(pl.LightningModule):
         mask = filter_connected_components(coords, seg)
 
         # compute metrics
-        self.f1(mask.long().flatten(), labels.long().flatten())
+        self.iou(mask.long().flatten(), labels.long().flatten())
+        self.dice(mask.long().flatten(), labels.long().flatten())
         
         # log metrics
-        self.log('f1/test', self.f1)
+        self.log('iou/test', self.iou)
+        self.log('dice/test', self.dice)
         
-        draw_positive_voxels(mask)
+        # draw_positive_voxels(mask)
 
     def predict_step(
         self,
