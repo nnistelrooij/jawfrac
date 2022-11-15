@@ -18,7 +18,7 @@ def infer():
     )
 
     model = MandibleSegModule.load_from_checkpoint(
-        'checkpoints/mandibles_no_coords.ckpt',
+        'checkpoints/mandibles.ckpt',
         num_classes=dm.num_classes,
         batch_size=batch_size,
         **config['model'],
@@ -40,7 +40,7 @@ def infer():
         # save to storage
         volume = volume.cpu().numpy().astype(np.uint16)
         img = nibabel.Nifti1Image(volume, affine)
-        nibabel.save(img, path.parent / 'mandible4.nii.gz')
+        nibabel.save(img, path.parent / 'mandible.nii.gz')
 
 
 if __name__ == '__main__':

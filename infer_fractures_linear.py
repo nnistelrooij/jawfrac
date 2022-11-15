@@ -1,9 +1,6 @@
-from typing import Any, Dict
-
 import nibabel
 import numpy as np
 import pytorch_lightning as pl
-import torch
 import yaml
 
 from jawfrac.datamodules import JawFracDataModule
@@ -25,7 +22,7 @@ def infer():
     )
 
     model = LinearJawFracModule.load_from_checkpoint(
-        'checkpoints/fractures_linear_no_cascade.ckpt',
+        'checkpoints/fractures_linear.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )

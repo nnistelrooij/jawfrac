@@ -23,7 +23,7 @@ class FracNetDataset(VolumeDataset):
     ) -> None:
         pre_transform = T.Compose(
             T.NonNegativeCrop(),
-            # T.RegularSpacing(spacing=regular_spacing),
+            T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
             T.PatchIndices(patch_size=patch_size, stride=stride),
             *((

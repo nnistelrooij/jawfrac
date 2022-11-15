@@ -116,6 +116,8 @@ class LinearJawFracModule(pl.LightningModule):
         self.dice = Dice(multiclass=False)
         self.precision_metric = FracPrecision()
         self.recall_metric = FracRecall()
+        self.recall_metric_linear = FracRecall()
+        self.recall_metric_displaced = FracRecall()
 
         self.lr = lr
         self.epochs = epochs
@@ -228,6 +230,9 @@ class LinearJawFracModule(pl.LightningModule):
         ],
         batch_idx: int,
     ) -> None:
+        files = self.trainer.datamodule.test_dataset.files[batch_idx]
+        print(files[0].parent.stem)
+        
         features, mandible, patch_idxs, target = batch
 
         # predict binary segmentation
@@ -243,7 +248,9 @@ class LinearJawFracModule(pl.LightningModule):
             torch.any(target > 0)[None].long(),
         )
         self.precision_metric(mask, target >= self.conf_thresh)
-        self.recall_metric(mask, target >= self.conf_thresh)       
+        self.recall_metric(mask, target >= self.conf_thresh)
+        self.recall_metric_linear(mask, (self.conf_thresh <= target) & (target != 2))
+        self.recall_metric_displaced(mask, target == 2)
 
         for label in torch.unique(components)[1:]:
             if not torch.any(target[components == label] == 2):
@@ -260,6 +267,8 @@ class LinearJawFracModule(pl.LightningModule):
         self.log('dice/test', self.dice)
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall_metric)
+        self.log('recall_linear/test', self.recall_metric_linear)
+        self.log('recall_displaced/test', self.recall_metric_displaced)
         
         # visualize results with Open3D
         # draw_fracture_result(mandible, mask, labels >= self.conf_thresh)

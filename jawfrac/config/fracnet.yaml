@@ -1,5 +1,6 @@
 work_dir: '/home/mka3dlab/Documents/logs/fractures'
 work_dir: '/home/nielsje/logs'
+root: '/mnt/d/nielsvannistelrooij/logs'
 version: no_extend_volume
 seed: 0
 
@@ -21,8 +22,9 @@ model:
 
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'
-  root: '/mnt/d/Users/Niels-laptop/Documents'
+  # root: '/mnt/d/Users/Niels-laptop/Documents'
   # root: '/mnt/diag/nielsvannistelrooij/fractures'
+  root: '/mnt/d/nielsvannistelrooij/fractures'
   regex_filter: 'Annotation UK'
   val_size: 0.2
   test_size: 0.2
@@ -30,11 +32,7 @@ datamodule:
   num_workers: 1
   pin_memory: True
   persistent_workers: True
-  mandible_crop:
-    padding: 0.0  # mm
-    extend: False
   regular_spacing: 0.4  # mm
-  haar_transform: False
   patch_size: 64
   stride: 48
   expand_label:
@@ -43,6 +41,5 @@ datamodule:
     smooth: 0.0
     negative_iters: 16
   max_patches_per_scan: 4
-  ignore_outside: False
 
 accumulate_grad_batches: 1

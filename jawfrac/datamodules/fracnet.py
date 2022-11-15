@@ -14,6 +14,8 @@ from jawfrac.datamodules.jawfrac import JawFracDataModule
 
 class FracNetDataModule(VolumeDataModule):
 
+    REGIONS = JawFracDataModule.REGIONS
+
     def __init__(
         self,
         linear: bool,
