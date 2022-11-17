@@ -26,6 +26,7 @@ from jawfrac.visualization import (
     draw_confusion_matrix,
     draw_fracture_result,
     draw_positive_voxels,
+    draw_roc_curve,
 )
 
 
@@ -41,10 +42,14 @@ def combine_linear_displaced_predictions(
     mean_conf_threshold: float,
     mean_min_component_size: int,
     verbose: bool,
-) -> TensorType['D', 'H', 'W', torch.int64]:
+) -> Tuple[
+    TensorType['D', 'H', 'W', torch.int64],
+    TensorType['D', 'H', 'W', torch.float32],
+]:
     # make a volume from the combination of both volumes
+    avg = (linear + displaced) / 2
     out = filter_connected_components(
-        mandible, (linear + displaced) / 2,
+        mandible, avg,
         mean_conf_threshold, mean_min_component_size, max_dist,
     )
 
@@ -78,7 +83,7 @@ def combine_linear_displaced_predictions(
 
         out[displaced == i] = out.max() + 1
 
-    return out
+    return out, avg
 
 
 class LinearDisplacedJawFracModule(pl.LightningModule):
@@ -277,6 +282,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
     ) -> Tuple[
         TensorType['D', 'H', 'W', torch.float32],
         TensorType['D', 'H', 'W', torch.float32],
+        TensorType[torch.bool],
+        TensorType[torch.float32],
     ]:
         file = self.trainer.datamodule.test_dataset.files[batch_idx][0]
         print(file.parent.stem)
@@ -286,7 +293,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         # predict binary segmentations
         linear, displaced = self.predict_volumes(features, patch_idxs)
         
-        components = combine_linear_displaced_predictions(
+        components, avg = combine_linear_displaced_predictions(
             mandible, linear, displaced, **self.post_processing,
         )
         mask = components > 0
@@ -299,6 +306,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             torch.any(mask)[None].long(),
             torch.any(target > 0)[None].long(),
         )
+        scan_true = torch.any(target > 0)
+        scan_score = avg.amax()
 
         self.precision_metric(mask, target >= self.conf_thresh)
         self.recall_metric(mask, target >= self.conf_thresh)
@@ -323,28 +332,24 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.log('iou/test', self.iou)
         self.log('dice/test', self.dice)
 
-        if not self.verbose:
-            # fill corresponding voxels in source volume
-            mask = fill_source_volume(mask, affine, shape)
-
-            file = self.trainer.datamodule.root / file
-            img = nibabel.load(file)
-            file = file.parent / 'frac_pred.nii.gz'
-            img = nibabel.Nifti1Image(mask.cpu().numpy().astype(np.uint16), img.affine)
-            nibabel.save(img, file)
-    
-        return linear.cpu(), displaced.cpu()
+        return linear.cpu(), displaced.cpu(), scan_true, scan_score
 
     def test_epoch_end(
         self,
         outputs: List[Tuple[
             TensorType['D', 'H', 'W', torch.float32],
             TensorType['D', 'H', 'W', torch.float32],
+            TensorType[torch.bool],
+            TensorType[torch.float32],
         ]]
     ) -> None:
         # torch.save(outputs, '/mnt/d/nielsvannistelrooij/outputs.pth')
 
         draw_confusion_matrix(self.confmat.compute(), title='Binary scan')
+
+        y_true = torch.stack([out[2] for out in outputs])
+        y_score = torch.stack([out[3] for out in outputs])
+        draw_roc_curve(y_true, y_score)
 
     def predict_step(
         self,
@@ -368,7 +373,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         # filter small connected components
         mask = combine_linear_displaced_predictions(
             mandible, linear, displaced, **self.post_processing,
-        ) > 0
+        )[0] > 0
 
         # fill corresponding voxels in source volume
         mask = fill_source_volume(mask, affine, shape)
