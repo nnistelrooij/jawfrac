@@ -5,7 +5,8 @@ import pytorch_lightning as pl
 from scipy import ndimage
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
-from torchmetrics import F1Score
+from torchmetrics import F1Score, Dice
+from torchmetrics.classification import BinaryJaccardIndex
 from torchtyping import TensorType
 from torch_scatter import scatter_mean
 
@@ -26,8 +27,9 @@ from jawfrac.visualization import draw_positive_voxels
 def filter_connected_components(
     coords: TensorType['D', 'H', 'W', 3, torch.float32],
     seg: TensorType['D', 'H', 'W', torch.float32],
-    conf_thresh: float=0.5,
-    max_dist: float=2.0,
+    conf_thresh: float,
+    min_component_size: int,
+    max_dist: float,
 ) -> TensorType['D', 'H', 'W', torch.bool]:
     # determine connected components in volume
     labels = (seg >= conf_thresh).long()
@@ -41,14 +43,14 @@ def filter_connected_components(
     _, component_idxs, component_counts = torch.unique(
         component_idxs, return_inverse=True, return_counts=True,
     )
-    count_mask = component_counts >= 20_000
+    count_mask = component_counts >= min_component_size
 
     # determine components with mean confidence at least 0.70
     component_probs = scatter_mean(
         src=seg.flatten(),
         index=component_idxs.flatten(),
     )
-    prob_mask = component_probs >= conf_thresh
+    prob_mask = component_probs >= 0.5
 
     # determine components within two variance of centroid
     coords[..., 0] -= 1  # left-right symmetry
@@ -78,7 +80,9 @@ class MandibleSegModule(pl.LightningModule):
         focal_loss: bool,
         dice_loss: bool,
         x_axis_flip: bool,
-        distance_filter: bool,
+        conf_threshold: float,
+        min_component_size: int,
+        max_dist: float,
         batch_size: int=0,
         **model_cfg: Dict[str, Any],
     ) -> None:
@@ -87,13 +91,17 @@ class MandibleSegModule(pl.LightningModule):
         self.model = nn.MandibleNet(**model_cfg)
         self.criterion = nn.MandibleLoss(focal_loss, dice_loss)
         self.f1 = F1Score(num_classes=2, average='macro')
+        self.iou = BinaryJaccardIndex()
+        self.dice = Dice(multiclass=False)
 
         self.lr = lr
         self.epochs = epochs
         self.warmup_epochs = warmup_epochs
         self.weight_decay = weight_decay
         self.x_axis_flip = x_axis_flip
-        self.max_dist = 2.0 if distance_filter else float('inf')
+        self.conf_thresh = conf_threshold
+        self.min_component_size = min_component_size
+        self.max_dist = max_dist
         self.batch_size = batch_size
 
     def forward(
@@ -220,15 +228,19 @@ class MandibleSegModule(pl.LightningModule):
         coords, seg = self.predict_volumes(features, patch_idxs)
 
         # remove small or low-confidence connected components
-        mask = filter_connected_components(coords, seg)
+        mask = filter_connected_components(
+            coords, seg, self.conf_thresh, self.min_component_size, self.max_dist,
+        )
 
         # compute metrics
-        self.f1(mask.long().flatten(), labels.long().flatten())
+        self.iou(mask.long().flatten(), labels.long().flatten())
+        self.dice(mask.long().flatten(), labels.long().flatten())
         
         # log metrics
-        self.log('f1/test', self.f1)
+        self.log('iou/test', self.iou)
+        self.log('dice/test', self.dice)
         
-        draw_positive_voxels(mask)
+        # draw_positive_voxels(mask)
 
     def predict_step(
         self,
@@ -250,9 +262,7 @@ class MandibleSegModule(pl.LightningModule):
 
         # remove small or low-confidence connected components
         volume_mask = filter_connected_components(
-            coords,
-            seg,
-            max_dist=self.max_dist,
+            coords, seg, self.conf_thresh, self.min_component_size, self.max_dist,
         )
 
         # fill volume with original shape given foreground mask

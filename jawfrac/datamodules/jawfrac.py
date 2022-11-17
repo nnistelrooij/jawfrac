@@ -86,7 +86,7 @@ class JawFracDataModule(VolumeDataModule):
         if not isinstance(self, JawFracDataModule):
             return list(zip(scan_files))
 
-        mandible_files = self._filter_files('**/mandible200.nii.gz')
+        mandible_files = self._filter_files('**/mandible.nii.gz')
 
         if stage == 'predict':
             return list(zip(scan_files, mandible_files))
@@ -109,6 +109,9 @@ class JawFracDataModule(VolumeDataModule):
         if self.val_size == 1:
             return [], files, []
 
+        if self.test_size == 1:
+            return [], [], files
+
         patient_files = self._split_patients(files)
         control_files = self._split_controls(files)
         
@@ -121,7 +124,7 @@ class JawFracDataModule(VolumeDataModule):
         files = [pfs + cfs for pfs, cfs in zip(patient_files, control_files)]
 
         for key, fs in zip(['train', 'val', 'test'], files):
-            dirs = '\n'.join([fs[0].parent.stem for fs in fs])
+            dirs = '\n'.join([str(fs[0]) for fs in fs])
             with open(self.root / f'{key}.txt', 'w') as f:
                 f.write(dirs + '\n')
 
@@ -273,7 +276,7 @@ class JawFracDataModule(VolumeDataModule):
 
             non_frac_files = []
             for files in all_files:
-                frac_file = self.root / files[0].parent / 'frac_pred2.nii.gz'
+                frac_file = self.root / files[0].parent / 'frac_pred.nii.gz'
                 if frac_file.exists():
                     continue
                 
@@ -281,7 +284,7 @@ class JawFracDataModule(VolumeDataModule):
 
             self.predict_dataset = JawFracDataset(
                 stage='predict',
-                files=non_frac_files[:1],
+                files=all_files[:1],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )
@@ -336,9 +339,11 @@ class JawFracDataModule(VolumeDataModule):
         features = batch[0]['features']
         mandible = batch[0]['mandible']
         patch_idxs = batch[0]['patch_idxs']
+        affine = batch[0]['affine']
+        shape = batch[0]['shape']
         labels = batch[0]['labels']
         
-        return features, mandible, patch_idxs, labels
+        return features, mandible, patch_idxs, affine, shape, labels
 
     def predict_collate_fn(
         self,

@@ -25,7 +25,7 @@ def infer():
     dm.setup('test')
 
     model = LinearDisplacedJawFracModule.load_from_checkpoint(
-        'checkpoints/old_fractures_linear_displaced_patch_size=64.ckpt',
+        '/mnt/diag/jawfrac/checkpoints/old_fractures_linear_displaced_patch_size=64.ckpt',
         num_classes=dm.num_classes,
         batch_size=batch_size,
         **config['model'],
@@ -36,7 +36,7 @@ def infer():
         devices=1,
         max_epochs=config['model']['epochs'],
     )
-    preds = trainer.test(model, datamodule=dm)
+    preds = trainer.predict(model, datamodule=dm)
 
     for i, pred in enumerate(tqdm(preds)):
         path = dm.root / dm.predict_dataset.files[i][0]
@@ -46,8 +46,8 @@ def infer():
         label[(label == 0) & pred.cpu().numpy()] = 3
 
         img = nibabel.load(path)
-        file = path.parent / 'frac_pred2.nii.gz'
-        img = nibabel.Nifti1Image(label, img.affine)
+        file = path.parent / 'frac_pred_all.nii.gz'
+        img = nibabel.Nifti1Image(pred.cpu().numpy().astype(np.uint16), img.affine)
         nibabel.save(img, file)
 
 

@@ -14,14 +14,15 @@ model:
   head_kernel_size: 1
   focal_loss: False
   dice_loss: False
+  max_dist: 2.0  # variance
+  min_component_size: 20_000
+  conf_threshold: 0.5
   x_axis_flip: True
-  distance_filter: True
 
 datamodule:
   # root: '/mnt/diag/nielsvannistelrooij/Fabian'
-  root: '/mnt/d/nielsvannistelrooij/fractures'
-  root: '/input'
-  regex_filter: ''
+  root: '/mnt/diag/fractures/CTs'
+  regex_filter: 'Juliane'
   val_size: 0.2
   test_size: 0.0
   batch_size: 40

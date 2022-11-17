@@ -67,7 +67,7 @@ class GrayscaleAdaptivePerceptionModule(nn.Module):
 
     def __init__(
         self,
-        num_awms: int=3,
+        num_awms: int=0,
         awm_channels: int=16,
         init_level: float=1036.0,
         init_width: float=4120.0,
@@ -94,6 +94,7 @@ class GrayscaleAdaptivePerceptionModule(nn.Module):
         for awm in self.awms:
             xs.append(awm(x))
 
+        x = x.clip(self.min, self.max)
         x = (x - self.min) / (self.max - self.min)
         x = (x * 2) - 1
         xs.append(x)

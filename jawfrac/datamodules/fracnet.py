@@ -14,6 +14,8 @@ from jawfrac.datamodules.jawfrac import JawFracDataModule
 
 class FracNetDataModule(VolumeDataModule):
 
+    REGIONS = JawFracDataModule.REGIONS
+
     def __init__(
         self,
         linear: bool,
@@ -33,7 +35,7 @@ class FracNetDataModule(VolumeDataModule):
         )
 
         self.default_transforms = T.Compose(
-            T.IntensityAsFeatures(window=(-200, 1000)),
+            T.IntensityAsFeatures(),
             T.ToTensor(),
         )
 
@@ -64,7 +66,7 @@ class FracNetDataModule(VolumeDataModule):
 
             rng = np.random.default_rng(self.seed)
             val_transforms = T.Compose(
-                T.IntensityAsFeatures(window=(-200, 1000)),
+                T.IntensityAsFeatures(),
                 T.PositiveNegativePatches(
                     max_patches=self.max_patches_per_scan,
                     ignore_outside=False,
@@ -74,6 +76,9 @@ class FracNetDataModule(VolumeDataModule):
             )
             train_transforms = T.Compose(
                 T.RandomXAxisFlip(rng=rng),
+                T.RandomPatchTranslate(
+                    max_voxels=16, classes=[1], rng=rng
+                ),
                 val_transforms,
             )
 
@@ -90,16 +95,19 @@ class FracNetDataModule(VolumeDataModule):
                 **self.dataset_cfg,
             )
 
-            if self.trainer is not None: self.trainer.logger.log_hyperparams({
-                'pre_transform': str(self.train_dataset.pre_transform),
-                'train_transform': str(train_transforms),
-                'val_transform': str(val_transforms),
-            })
-
+            if self.trainer is not None:
+                try:
+                    self.trainer.logger.log_hyperparams({
+                        'pre_transform': repr(self.train_dataset.pre_transform),
+                        'train_transform': repr(train_transforms),
+                        'val_transform': repr(val_transforms),
+                    })
+                except:
+                    pass
 
         if stage is None or stage =='test':
             files = self._files('test')
-            _, files, _ = self._split(files)
+            _, _, files = self._split(files)
 
             self.test_dataset = FracNetDataset(
                 stage='test',

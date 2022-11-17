@@ -55,8 +55,8 @@ def train():
 
 
     trainer = pl.Trainer(
-        # accelerator='gpu',
-        # devices=1,
+        accelerator='gpu',
+        devices=1,
         max_epochs=config['model']['epochs'],
         logger=logger,
         accumulate_grad_batches=config['accumulate_grad_batches'],

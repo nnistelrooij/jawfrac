@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Tuple, Union
 import pytorch_lightning as pl
 from scipy import ndimage
 import torch
-from torch.optim.lr_scheduler import _LRScheduler
+from torch.optim.lr_scheduler import _LRScheduler, LinearLR
 from torchmetrics import ConfusionMatrix, F1Score, Dice
 from torchmetrics.classification import BinaryJaccardIndex
 from torchtyping import TensorType
@@ -81,6 +81,8 @@ class FracNet(pl.LightningModule):
         self.frac_net = nn.JawFracNet(
             num_classes=1,
             mandible_channels=0,
+            gapm_level=450.0,
+            gapm_width=1100.0,
             **model_cfg,
         )
 
@@ -90,8 +92,18 @@ class FracNet(pl.LightningModule):
         self.f1 = F1Score(num_classes=2, average='macro')
         self.iou = BinaryJaccardIndex()
         self.dice = Dice(multiclass=False)
-        self.precision_metric = FracPrecision()
-        self.recall_metric = FracRecall()
+        self.precision_metric = FracPrecision(
+            voxel_thresh=(min_component_size, 1000),
+        )
+        self.recall_metric = FracRecall(
+            voxel_thresh=(min_component_size, 1000),
+        )
+        self.recall_metric_linear = FracRecall(
+            voxel_thresh=(min_component_size, 1000),
+        )
+        self.recall_metric_displaced = FracRecall(
+            voxel_thresh=(min_component_size, 1000),
+        )
 
         self.lr = lr
         self.epochs = epochs
@@ -110,7 +122,7 @@ class FracNet(pl.LightningModule):
             TensorType['B', 'D', 'H', 'W', torch.float32],
         ],
     ]:
-        seg = self.frac_net(x, None, x[:, :1])
+        seg = self.frac_net(x, None, x[:, :0])
 
         return seg
 
@@ -202,12 +214,12 @@ class FracNet(pl.LightningModule):
         ],
         batch_idx: int,
     ) -> None:
-        features, mandible, patch_idxs, target = batch
+        features, patch_idxs, target = batch
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)
         components = filter_connected_components(
-            mandible, x, self.conf_thresh, self.min_component_size,
+            x, self.conf_thresh, self.min_component_size,
         )
         mask = components > 0
 
@@ -217,7 +229,9 @@ class FracNet(pl.LightningModule):
             torch.any(target > 0)[None].long(),
         )
         self.precision_metric(mask, target >= self.conf_thresh)
-        self.recall_metric(mask, target >= self.conf_thresh)       
+        self.recall_metric(mask, target >= self.conf_thresh)
+        self.recall_metric_linear(mask, (self.conf_thresh <= target) & (target != 2))
+        self.recall_metric_displaced(mask, target == 2)  
 
         for label in torch.unique(components)[1:]:
             if not torch.any(target[components == label] == 2):
@@ -234,6 +248,8 @@ class FracNet(pl.LightningModule):
         self.log('dice/test', self.dice)
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall_metric)
+        self.log('recall_linear/test', self.recall_metric_linear)
+        self.log('recall_displaced/test', self.recall_metric_displaced)
         
         # visualize results with Open3D
         # draw_fracture_result(mandible, mask, labels >= self.conf_thresh)
@@ -252,13 +268,13 @@ class FracNet(pl.LightningModule):
         ],
         batch_idx: int,
     ) -> TensorType['P', torch.float32]:
-        features, mandible, patch_idxs, affine, shape = batch
+        features, patch_idxs, affine, shape = batch
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)
 
         mask = filter_connected_components(
-            mandible, x ,self.conf_thresh, self.min_component_size,
+            x ,self.conf_thresh, self.min_component_size,
         ) > 0
 
         out = fill_source_volume(mask, affine, shape)
@@ -269,14 +285,28 @@ class FracNet(pl.LightningModule):
         List[torch.optim.Optimizer],
         List[_LRScheduler],
     ]:
-        opt = torch.optim.AdamW(
+        opt = torch.optim.Adam(
             params=self.parameters(),
             lr=self.lr,
-            weight_decay=self.weight_decay,
         )
 
+        batches_per_epoch = len(self.trainer.datamodule.train_dataloader())
         non_warmup_epochs = self.epochs - self.warmup_epochs
-        sch = CosineAnnealingLR(opt, T_max=non_warmup_epochs, min_lr_ratio=0.00)
-        sch = LinearWarmupLR(sch, self.warmup_epochs, init_lr_ratio=0.001)
+        sch = LinearLR(
+            opt,
+            start_factor=1.0,
+            end_factor=0.01,
+            total_iters=batches_per_epoch * non_warmup_epochs,
+        )
+        sch = LinearWarmupLR(
+            scheduler=sch,
+            warmup_steps=batches_per_epoch * self.warmup_epochs,
+            init_lr_ratio=0.0001,
+        )
+        sch = {
+            'scheduler': sch,
+            'interval': 'step',
+            'frequency': 1,
+        }
 
         return [opt], [sch]

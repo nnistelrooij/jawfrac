@@ -1,9 +1,6 @@
-from typing import Any, Dict
-
 import nibabel
 import numpy as np
 import pytorch_lightning as pl
-import torch
 import yaml
 
 from jawfrac.datamodules import JawFracDataModule
@@ -19,13 +16,13 @@ def infer():
     config['datamodule']['batch_size'] = 1
     dm = JawFracDataModule(
         linear=True,
-        displacements=False,
+        displacements=True,
         seed=config['seed'],
         **config['datamodule'],
     )
 
     model = LinearJawFracModule.load_from_checkpoint(
-        'checkpoints/fractures_linear.ckpt',
+        '/mnt/diag/jawfrac/checkpoints/fractures_linear.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )
@@ -35,7 +32,7 @@ def infer():
         devices=1,
         max_epochs=config['model']['epochs'],
     )
-    preds = trainer.test(model, datamodule=dm)
+    preds = trainer.predict(model, datamodule=dm)
 
     for (file, _), pred in zip(dm.predict_dataset.files, preds):
         pred = pred.cpu().numpy().astype(np.uint16)
@@ -43,7 +40,7 @@ def infer():
         img = nibabel.load(dm.root / file)
         affine = img.affine
 
-        file = file.parent / 'frac_pred.nii.gz'
+        file = file.parent / 'frac_pred_all.nii.gz'
         img = nibabel.Nifti1Image(pred, affine)
         nibabel.save(img, dm.root / file)
 

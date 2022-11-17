@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple, Union
 
 from scipy import ndimage
 import torch
@@ -12,22 +12,24 @@ class FracRecall(Metric):
 
     def __init__(
         self,
-        voxel_thresh: int=1000,
+        voxel_thresh: Union[int, Tuple[int, int]]=1000,
         dist_thresh: float=12.5,  # voxels
-        iou_thresh: float=0.1,
     ):
         super().__init__()
 
+        if not isinstance(voxel_thresh, tuple):
+            voxel_thresh = (voxel_thresh, voxel_thresh)
+
+        self.pred_thresh, self.target_thresh = voxel_thresh
         self.dist_thresh = dist_thresh
-        self.voxel_thresh = voxel_thresh
-        self.iou_thresh = iou_thresh
         
         self.add_state('pos', default=torch.tensor(0), dist_reduce_fx='sum')
         self.add_state('total', default=torch.tensor(0), dist_reduce_fx='sum')
 
+    @staticmethod
     def cluster_voxels(
-        self,
         volume: TensorType['D', 'H', 'W', torch.bool],
+        voxel_thresh: int,
     ) -> List[TensorType['N', 3, torch.int64]]:
         voxels = torch.cartesian_prod(*[torch.arange(d) for d in volume.shape])
         voxels = voxels.reshape(volume.shape + (3,)).to(volume.device)
@@ -41,7 +43,7 @@ class FracRecall(Metric):
         _, inverse, counts = torch.unique(
             cluster_idxs, return_inverse=True, return_counts=True,
         )
-        cluster_idxs[(counts < self.voxel_thresh)[inverse]] = 0
+        cluster_idxs[(counts < voxel_thresh)[inverse]] = 0
 
         out = []
         for i in torch.unique(cluster_idxs)[1:]:
@@ -72,16 +74,24 @@ class FracRecall(Metric):
         if not torch.any(target):
             return
 
-        target_voxels = self.cluster_voxels(target)
+        target_voxels = self.cluster_voxels(target, self.target_thresh)
+
+        if not target_voxels:
+            return
+
         self.total += len(target_voxels)
 
         if not torch.any(pred):
+            print('FN')
             return
 
-        pred_voxels = self.cluster_voxels(pred)
+        pred_voxels = self.cluster_voxels(pred, self.pred_thresh)
         target_counts = self.compute_target_counts(pred_voxels, target_voxels)
         
-        self.pos += torch.sum(target_counts.amax(dim=0) >= self.voxel_thresh)
+        self.pos += torch.sum(target_counts.amax(dim=0) >= self.target_thresh)
+
+        if not torch.all(target_counts.amax(dim=0) >= self.target_thresh):
+            print('FN')
 
     def compute(self) -> TensorType[torch.float32]:
         return self.pos / (self.total + 1e-6)

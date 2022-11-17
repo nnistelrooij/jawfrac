@@ -1,7 +1,8 @@
 from typing import Any, Dict, List, Tuple, Union
 
+import nibabel
+import numpy as np
 import pytorch_lightning as pl
-from scipy import ndimage
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 from torchmetrics import ConfusionMatrix, Dice, F1Score
@@ -131,6 +132,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.iou = BinaryJaccardIndex()
         self.dice = Dice(multiclass=False)
         self.precision_metric = FracPrecision()
+        self.recall_metric_linear = FracRecall()
+        self.recall_metric_displaced = FracRecall()
         self.recall_metric = FracRecall()
 
         self.num_classes = max(2, num_classes)
@@ -143,8 +146,6 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.post_processing = post_processing
         self.conf_thresh = post_processing['linear_conf_threshold']
         self.verbose = post_processing['verbose']
-
-        self.outputs = torch.load('/mnt/d/nielsvannistelrooij/outputs.pth')
 
     def forward(
         self,
@@ -284,15 +285,13 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         TensorType[torch.bool],
         TensorType[torch.float32],
     ]:
-        files = self.trainer.datamodule.test_dataset.files[batch_idx]
-        print(files[0].parent.stem)
+        file = self.trainer.datamodule.test_dataset.files[batch_idx][0]
+        print(file.parent.stem)
 
-        features, mandible, patch_idxs, target = batch
+        features, mandible, patch_idxs, affine, shape, target = batch
 
         # predict binary segmentations
-        # linear, displaced = self.predict_volumes(features, patch_idxs)
-        linear, displaced = self.outputs[batch_idx]
-        linear, displaced = linear.cuda(), displaced.cuda()
+        linear, displaced = self.predict_volumes(features, patch_idxs)
         
         components, avg = combine_linear_displaced_predictions(
             mandible, linear, displaced, **self.post_processing,
@@ -312,6 +311,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
 
         self.precision_metric(mask, target >= self.conf_thresh)
         self.recall_metric(mask, target >= self.conf_thresh)
+        self.recall_metric_linear(mask, (self.conf_thresh <= target) & (target != 2))
+        self.recall_metric_displaced(mask, target == 2)
 
 
         for label in torch.unique(components)[1:]:
@@ -319,14 +320,15 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
                 continue
 
             components[components == label] = 0
-        mask = components > 0        
         target = (self.conf_thresh <= target) & (target != 2)
-        self.iou(mask.long().flatten(), target.long().flatten())
-        self.dice(mask.long().flatten(), target.long().flatten())
+        self.iou((components > 0).long().flatten(), target.long().flatten())
+        self.dice((components > 0).long().flatten(), target.long().flatten())
         
         # log metrics
         self.log('precision/test', self.precision_metric)
         self.log('recall/test', self.recall_metric)
+        self.log('recall_linear/test', self.recall_metric_linear)
+        self.log('recall_displaced/test', self.recall_metric_displaced)
         self.log('iou/test', self.iou)
         self.log('dice/test', self.dice)
 
