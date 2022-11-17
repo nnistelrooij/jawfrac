@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 import open3d
-from sklearn.metrics import ConfusionMatrixDisplay
+from sklearn.metrics import ConfusionMatrixDisplay, RocCurveDisplay
 import torch
 from torchtyping import TensorType
 
@@ -117,3 +117,28 @@ def draw_confusion_matrix(
     cmd.plot()
     plt.title(title)
     plt.show()
+
+
+def draw_roc_curve(
+    y_true: TensorType['N', torch.bool],
+    y_score: TensorType['N', torch.float32],
+    title: str='ROC curve',
+) -> None:
+    rcd = RocCurveDisplay.from_predictions(
+        y_true.cpu().numpy(),
+        y_score.cpu().numpy(),
+    )
+
+    _, ax = plt.subplots(1, 1, figsize=(8, 8))
+    rcd.plot(ax=ax)
+    plt.grid()
+    plt.title(title)
+    plt.show()
+
+
+if __name__ == '__main__':
+    confmat = torch.tensor([
+        [33, 2],
+        [1, 34],
+    ])
+    draw_confusion_matrix(confmat)

@@ -125,29 +125,26 @@ def visualize_mandible_patch(path: Path, path2,):
     plt.show()
 
 
-def visualize_expand_label():
-    root = Path('/mnt/d/Users/Niels-laptop/Downloads/fractures/')
-
-    scan_file = root / 'Patient17_main_image.nii.gz'
-    frac_file = root / 'Patient17_seg_normal.nii.gz'
-
-    img = nibabel.load(scan_file)
+def visualize_expand_label(scan_path, frac_path):
+    img = nibabel.load(scan_path)
+    shape = np.array(img.header.get_data_shape())
     intensities = np.asarray(img.dataobj)
-    intensities = (intensities - intensities[intensities > 0].mean()) / 255 * 4096
+    if intensities.min() == 0 and intensities.max() == 255:
+        intensities = (intensities - intensities[intensities > 0].mean()) / 255 * 4096
 
     print('start')
     intensities = ndimage.zoom(
         input=intensities,
-        zoom=[1, 1, 2.5],
+        zoom=np.array(img.header.get_zooms()) / 0.4,
     )
     print('interp 1')
 
 
-    img = nibabel.load(frac_file)
-    label = np.asarray(img.dataobj)
+    img = nibabel.load(frac_path)
+    lbl = np.asarray(img.dataobj)
     label = ndimage.zoom(
-        input=label,
-        zoom=[1, 1, 2.5],
+        input=lbl,
+        zoom=np.array(img.header.get_zooms()) / 0.4,
         output=float,
     ).round().astype(bool)
     print('interp 2')
@@ -171,8 +168,8 @@ def visualize_expand_label():
 
     out = ndimage.zoom(
         input=out,
-        zoom=[1, 1, 0.4],
-    ) >= 0.2
+        zoom=0.4 / np.array(img.header.get_zooms()),
+    ) >= 0.1
 
 
     # out = out.clip(0, 1)
@@ -183,22 +180,27 @@ def visualize_expand_label():
     # plt.savefig('/mnt/d/Users/Niels-laptop/Documents/Master Thesis/expand_label_3.png', bbox_inches='tight', pad_inches=0)
     # plt.show()
 
-    out = out[:, :, :199].astype(np.uint16)
+    out = out[:shape[0], :shape[1], :shape[2]].astype(np.uint16)
 
-    img = nibabel.Nifti1Image(out, img.affine)
-    nibabel.save(img, root / 'expand_label_bi.nii.gz')
+    lbl[(lbl == 0) & (out == 1)] = 3
+
+    img = nibabel.Nifti1Image(lbl, img.affine)
+    nibabel.save(img, scan_path.parent / 'expand_label.nii.gz')
 
 
 
 if __name__ == '__main__':
-    path = Path('/mnt/d/Users/Niels-laptop/Documents/Annotation UK/103/Patient103_main_image.nii.gz')
+    path = Path('/mnt/d/Users/Niels-laptop/Documents/CTs/Stefan/main.nii.gz')
     # path = Path(r'D:\')
     # visualize_input(path)
     # visualize_patch(path)
 
-    visualize_mandible(path, path.parent / 'mandible200.nii.gz')
+    visualize_mandible(path, path.parent / 'mandible.nii.gz')
     # visualize_mandible_patch(path)
 
     # visualize_mandible_patch(path, path.parent / 'frac_pred_linear.nii.gz')
 
-    # visualize_expand_label()
+    visualize_expand_label(
+        path / '81' / 'Patient81_main_image.nii.gz',
+        path / '81' / 'label.nii.gz',
+    )
