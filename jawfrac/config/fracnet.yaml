@@ -1,13 +1,11 @@
-work_dir: '/home/mka3dlab/Documents/logs/fractures'
-work_dir: '/home/nielsje/logs'
-root: '/mnt/d/nielsvannistelrooij/logs'
-version: no_extend_volume
+work_dir: '/home/mkaailab/Documents/logs/fracnet'
+version: 2
 seed: 0
 
 model:
-  lr: 0.002
-  epochs: 500
-  warmup_epochs: 20
+  lr: 0.1
+  epochs: 100
+  warmup_epochs: 1
   weight_decay: 0.0  
   num_awms: 0
   coords: ''
@@ -21,10 +19,7 @@ model:
   min_component_size: 200
 
 datamodule:
-  root: '/home/mka3dlab/Documents/fractures'
-  # root: '/mnt/d/Users/Niels-laptop/Documents'
-  # root: '/mnt/diag/nielsvannistelrooij/fractures'
-  root: '/mnt/d/nielsvannistelrooij/fractures'
+  root: '/mnt/diag/fractures'
   regex_filter: 'Annotation UK'
   val_size: 0.2
   test_size: 0.2

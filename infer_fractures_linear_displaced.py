@@ -24,7 +24,7 @@ def infer():
     )
 
     model = LinearDisplacedJawFracModule.load_from_checkpoint(
-        'checkpoints/old_fractures_linear_displaced_patch_size=64.ckpt',
+        '/mnt/diag/jawfrac/checkpoints/old_fractures_linear_displaced_patch_size=64.ckpt',
         num_classes=dm.num_classes,
         batch_size=batch_size,
         **config['model'],
@@ -45,7 +45,7 @@ def infer():
         label[(label == 0) & pred.cpu().numpy()] = 3
 
         img = nibabel.load(path)
-        file = path.parent / 'frac_pred.nii.gz'
+        file = path.parent / 'frac_pred_all.nii.gz'
         img = nibabel.Nifti1Image(pred.cpu().numpy().astype(np.uint16), img.affine)
         nibabel.save(img, file)
 

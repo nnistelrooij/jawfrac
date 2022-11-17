@@ -801,17 +801,23 @@ class RandomPatchTranslate:
     def __init__(
         self,
         max_voxels: int,
+        classes: List[int]=[0, 1, 2],
         rng: Optional[np.random.Generator]=None,
     ) -> None:
         self.max = max_voxels
+        self.classes = np.array(classes).reshape(-1, 1)
         self.rng = rng if rng is not None else np.random.default_rng()
 
     def __call__(
         self,
         intensities: NDArray[Any],
-        patch_idxs: NDArray[Any],
+        patch_classes: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
+        # determine which patches should be translated
+        patch_mask = np.any(patch_classes[np.newaxis] == self.classes, axis=0)
+        patch_idxs = data_dict['patch_idxs'][patch_mask]
+
         # sample random translations
         trans = self.rng.integers(
             low=-self.max,
@@ -830,7 +836,8 @@ class RandomPatchTranslate:
 
         # apply translations to patch indices
         data_dict['intensities'] = intensities
-        data_dict['patch_idxs'] = patch_idxs + trans + diff
+        data_dict['patch_idxs'][patch_mask] = patch_idxs + trans + diff
+        data_dict['patch_classes'] = patch_classes
 
         return data_dict
 
@@ -838,6 +845,7 @@ class RandomPatchTranslate:
         return '\n'.join([
             self.__class__.__name__ + '(',
             f'    max_voxels={self.max},',
+            f'    classes={self.classes.flatten().tolist()},',
             ')',
         ])
 

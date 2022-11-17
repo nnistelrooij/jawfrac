@@ -1,4 +1,4 @@
-work_dir: '/mnt/d/nielsvannistelrooij/logs'
+work_dir: '/home/mkaailab/Documents/logs'
 # work_dir: '/output'
 version: 303
 seed: 0
@@ -44,8 +44,8 @@ model:
 datamodule:
   root: '/mnt/d/nielsvannistelrooij/fractures'
   # root: '/input'
-  # root: '/mnt/diag/nielsvannistelrooij/fractures'
-  regex_filter: ''
+  root: '/mnt/diag/fractures'
+  regex_filter: 'Annotation UK/109'
   val_size: 0.2
   test_size: 0.2
   batch_size: 24

@@ -30,9 +30,8 @@ model:
 
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'
-  root: '/mnt/d/nielsvannistelrooij/fractures'
-  # root: '/mnt/diag/nielsvannistelrooij/fractures'
-  regex_filter: 'Annotation UK'
+  root: '/mnt/diag/fractures'
+  regex_filter: 'Annotation UK/109'
   val_size: 0.2
   test_size: 0.2
   batch_size: 4

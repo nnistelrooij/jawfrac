@@ -142,8 +142,6 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         self.conf_thresh = post_processing['linear_conf_threshold']
         self.verbose = post_processing['verbose']
 
-        self.outputs = torch.load('/mnt/d/nielsvannistelrooij/outputs.pth')
-
     def forward(
         self,
         x: TensorType['P', 1, 'size', 'size', 'size', torch.float32],       

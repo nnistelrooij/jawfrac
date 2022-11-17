@@ -14,19 +14,24 @@ class FracPrecision(FracRecall):
         if not torch.any(pred):
             return
 
-        pred_voxels = self.cluster_voxels(pred)
+        pred_voxels = self.cluster_voxels(pred, self.pred_thresh)
         self.total += len(pred_voxels)
 
         if not torch.any(target):
             print('FP')
             return
 
-        target_voxels = self.cluster_voxels(target)
+        target_voxels = self.cluster_voxels(target, self.target_thresh)
+
+        if not target_voxels:
+            print('FP')
+            return
+
         target_counts = self.compute_target_counts(pred_voxels, target_voxels)
         
-        self.pos += torch.sum(target_counts.amax(dim=1) >= self.voxel_thresh)
+        self.pos += torch.sum(target_counts.amax(dim=1) >= self.target_thresh)
         
-        if not torch.all(target_counts.amax(dim=1) >= self.voxel_thresh):
+        if not torch.all(target_counts.amax(dim=1) >= self.target_thresh):
             print('FP')
 
     def compute(self) -> TensorType[torch.float32]:

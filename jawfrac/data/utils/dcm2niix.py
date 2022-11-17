@@ -4,7 +4,7 @@ import subprocess
 
 
 if __name__ == '__main__':
-    root = Path('/home/mka3dlab/Documents/fractures/CTs')
+    root = Path('/mnt/diag/fractures/CTs')
     dirs = set(p.parent for p in root.glob('**/*.dcm'))
     for path in dirs:
         subprocess.run([

@@ -36,7 +36,7 @@ def infer_mandible():
     img = nibabel.load(file)
 
     img = nibabel.Nifti1Image(mask, img.affine)
-    nibabel.save(img, file.parent / 'mandible200.nii.gz')
+    nibabel.save(img, file.parent / 'mandible.nii.gz')
 
 
 def infer_fractures():

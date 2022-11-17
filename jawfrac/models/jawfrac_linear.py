@@ -233,7 +233,7 @@ class LinearJawFracModule(pl.LightningModule):
         files = self.trainer.datamodule.test_dataset.files[batch_idx]
         print(files[0].parent.stem)
         
-        features, mandible, patch_idxs, target = batch
+        features, mandible, patch_idxs, _, _, target = batch
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)

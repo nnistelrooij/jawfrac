@@ -109,6 +109,9 @@ class JawFracDataModule(VolumeDataModule):
         if self.val_size == 1:
             return [], files, []
 
+        if self.test_size == 1:
+            return [], [], files
+
         patient_files = self._split_patients(files)
         control_files = self._split_controls(files)
         
@@ -263,7 +266,7 @@ class JawFracDataModule(VolumeDataModule):
 
             self.test_dataset = JawFracDataset(
                 stage='test',
-                files=files[55:],
+                files=files,
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )
@@ -281,7 +284,7 @@ class JawFracDataModule(VolumeDataModule):
 
             self.predict_dataset = JawFracDataset(
                 stage='predict',
-                files=non_frac_files[:1],
+                files=all_files[:1],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )
