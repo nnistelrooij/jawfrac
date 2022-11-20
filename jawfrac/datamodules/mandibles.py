@@ -133,7 +133,7 @@ class MandibleSegDataModule(VolumeDataModule):
 
             self.predict_dataset = MandibleSegDataset(
                 stage='predict',
-                files=non_mandible_files[:1],
+                files=all_files[:1],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )

@@ -361,7 +361,12 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             TensorType[3, torch.int64],
         ],
         batch_idx: int,
-    ) -> TensorType['D', 'H', 'W', torch.bool]:
+    ) -> Tuple[
+        TensorType['D', 'H', 'W', torch.bool],
+        TensorType['D', 'H', 'W', torch.bool],  
+        TensorType[4, 4, torch.float32],
+        TensorType[3, torch.int64],
+    ]:
         files = self.trainer.datamodule.predict_dataset.files[batch_idx]
         print(files[0].parent.stem)
 
@@ -376,9 +381,9 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         )[0] > 0
 
         # fill corresponding voxels in source volume
-        mask = fill_source_volume(mask, affine, shape)
+        out = fill_source_volume(mask, affine, shape)
         
-        return mask
+        return mask, out, affine, shape
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],

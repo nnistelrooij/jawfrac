@@ -1,4 +1,4 @@
-work_dir: '/home/mkaailab/Documents/logs'
+work_dir: '/mnt/diag/fractures/CTs/test'
 # work_dir: '/output'
 version: 303
 seed: 0
@@ -44,14 +44,15 @@ model:
 datamodule:
   root: '/mnt/d/nielsvannistelrooij/fractures'
   # root: '/input'
-  root: '/mnt/diag/fractures'
-  regex_filter: 'Annotation UK/109'
+  root: '/mnt/diag/fractures/CTs/test'
+  regex_filter: ''
   val_size: 0.2
   test_size: 0.2
   batch_size: 24
   num_workers: 1
   pin_memory: True
   persistent_workers: True
+  pass_affine: True
   mandible_crop:
     padding: 10.0  # mm
     extend: True

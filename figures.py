@@ -8,7 +8,7 @@ from scipy import ndimage
 from jawfrac.visualization import visualize
 
 
-def wolla(path, threshold: int, min_voxels: int, dilate: bool=False):
+def wolla(path, threshold: int, min_voxels: int, dilate: int=0):
     img = nibabel.load(path)
 
     data = np.asarray(img.dataobj)
@@ -19,7 +19,7 @@ def wolla(path, threshold: int, min_voxels: int, dilate: bool=False):
         mask = ndimage.binary_dilation(
             input=mask,
             structure=ndimage.generate_binary_structure(3, 1),
-            iterations=1,
+            iterations=dilate,
         )
 
     labels, _ = ndimage.label(mask, ndimage.generate_binary_structure(3, 1))
@@ -42,16 +42,53 @@ def wolla(path, threshold: int, min_voxels: int, dilate: bool=False):
 
 
 def visualize_input(path):
-    _, points, colors = wolla(path, 130, 20_000)
+    _, points, colors = wolla(path, 300, 20_000)
+    points[:, 0] *= -1
 
     visualize(points, colors * 255)
 
 
 def visualize_mandible(path, path2):
-    labels, points, colors = wolla(path, 500, 20_000)
-    mandible_labels, mandible_points, mandible_colors = wolla(path2, 1, 1000, True)
-    mandible_colors[:, 0] = 1
-    # mandible_colors[:, 0] = 1 - mandible_colors[:, 0]
+    labels, points, colors = wolla(path, 300, 20_000)
+    # points[:, 0] *= -1
+
+    mandible_labels, mandible_points, mandible_colors = wolla(path2, 1, 1000, 1)
+    # mandible_points[:, 0] *= -1
+
+    # mandible_colors[:, 0] = 1
+    mandible_colors[:, 1] = 1 - mandible_colors[:, 1]
+    mandible_colors[:, 0] = 0
+    mandible_colors[:, 2] = 0
+
+    both_labels = np.concatenate((
+        np.column_stack(labels.nonzero()),
+        np.column_stack(mandible_labels.nonzero()),
+    ))
+    both_labels, inverse, counts = np.unique(both_labels, axis=0, return_inverse=True, return_counts=True)
+
+    labels = np.concatenate((
+        labels[(counts == 1)[inverse[:labels.shape[0]]]],
+        mandible_labels,
+    ))
+    points = np.concatenate((
+        points[(counts == 1)[inverse[:points.shape[0]]]],
+        mandible_points,
+    ))
+    colors = np.concatenate((
+        colors[(counts == 1)[inverse[:colors.shape[0]]]],
+        mandible_colors,
+    ))
+
+    return labels, points, colors
+
+def visualize_mandible_fracture(path, path2, path3):
+    labels, points, colors = visualize_mandible(path, path2)
+
+    mandible_labels, mandible_points, mandible_colors = wolla(path3, 1, 1000, 0)
+    # mandible_points[:, 0] *= -1
+
+    # mandible_colors[:, 0] = 1
+    mandible_colors[:, 0] = 1 - mandible_colors[:, 0]
     mandible_colors[:, 1:] = 0
 
     both_labels = np.concatenate((
@@ -190,9 +227,21 @@ def visualize_expand_label(scan_path, frac_path):
 
 
 if __name__ == '__main__':
-    path = Path('/mnt/d/Users/Niels-laptop/Documents/CTs/Stefan/main.nii.gz')
+    path = Path('/mnt/diag/fractures/Annotation UK')
     # path = Path(r'D:\')
-    # visualize_input(path)
+    # visualize_input(path / '52' / 'Patient52_main_image.nii.gz')
+    # visualize_mandible_fracture(
+    #     path / '52' / 'Patient52_main_image.nii.gz',
+    #     path / '52' / 'mandible.nii.gz',
+    #     path / '52' / 'frac_pred.nii.gz',
+    # )
+
+    visualize_mandible_fracture(
+        path / '178' / 'Patient178_main_image.nii.gz',
+        path / '178' / 'mandible.nii.gz',
+        path / '178' / 'frac_pred.nii.gz',
+    )
+
     # visualize_patch(path)
 
     visualize_mandible(path, path.parent / 'mandible.nii.gz')

@@ -21,6 +21,7 @@ class JawFracDataset(VolumeDataset):
         patch_size: int,
         stride: int,
         expand_label: Dict[str, int],
+        pass_affine: bool,
         **kwargs: Dict[str, Any],
     ) -> None:
         pre_transform = T.Compose(
@@ -38,6 +39,9 @@ class JawFracDataset(VolumeDataset):
             ) if stage == 'fit' else ()),
             T.ExpandLabel(**expand_label) if stage == 'test' else dict,
         )
+
+        self.spacing = (regular_spacing,)*3
+        self.pass_affine = pass_affine
 
         super().__init__(stage=stage, pre_transform=pre_transform, **kwargs)
 
@@ -63,8 +67,13 @@ class JawFracDataset(VolumeDataset):
         return {
             'intensities': intensities.astype(np.int16),
             'mandible': mask,
-            'spacing': np.array(img.header.get_zooms()),
-            'orientation': nibabel.io_orientation(img.affine),
+            'spacing': np.array(
+                self.spacing if self.pass_affine else img.header.get_zooms()
+            ),
+            'orientation': nibabel.io_orientation(
+                np.eye(4) if self.pass_affine else img.affine,
+            ),
+            'affine': img.affine if self.pass_affine else np.eye(4),
             'shape': np.array(img.header.get_data_shape()),
         }
 

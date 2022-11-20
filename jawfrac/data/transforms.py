@@ -149,7 +149,13 @@ class RegularSpacing:
     ) -> Dict[str, Any]:
         # compute how much bigger results should be
         zoom = spacing / self.spacing
-        # zoom[(0.8 <= zoom) & (zoom <= 1.2)] = 1
+        
+        # immediately return if zoom is not necessary
+        if np.all(zoom == 1):
+            data_dict['intensities'] = intensities
+            data_dict['spacing'] = spacing
+
+            return data_dict
 
         # interpolate intensities volume to given voxel spacing
         min_value, max_value = intensities.min(), intensities.max()

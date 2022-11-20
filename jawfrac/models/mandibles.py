@@ -251,7 +251,13 @@ class MandibleSegModule(pl.LightningModule):
             TensorType[3, torch.int64],
         ],
         batch_idx: int,
-    ) -> TensorType['D', 'H', 'W', torch.bool]:
+    ) -> Tuple[
+        TensorType['D', 'H', 'W', torch.float32],
+        TensorType['D', 'H', 'W', torch.bool],
+        TensorType['D', 'H', 'W', torch.bool],
+        TensorType[4, 4, torch.float32],
+        TensorType[3, torch.int64],
+    ]:
         files = self.trainer.datamodule.predict_dataset.files[batch_idx]
         print(files[0].parent.stem)
         
@@ -268,7 +274,7 @@ class MandibleSegModule(pl.LightningModule):
         # fill volume with original shape given foreground mask
         out = fill_source_volume(volume_mask, affine, shape)
 
-        return out
+        return features[0], volume_mask, out, affine, shape
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],
