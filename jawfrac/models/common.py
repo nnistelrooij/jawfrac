@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 from scipy import interpolate, ndimage
@@ -52,6 +52,7 @@ def batch_forward(
 
 def patches_subgrid(
     patch_idxs: TensorType['P', 3, 2, torch.int64],
+    mask: Optional[TensorType['P', torch.bool]],
 ) -> Tuple[
     TensorType['P', 3, torch.int64],
     List[TensorType['D', torch.float32]],
@@ -71,6 +72,9 @@ def patches_subgrid(
     subgrid_idxs = torch.column_stack(subgrid_idxs)
     subgrid_shape = tuple(p.shape[0] for p in subgrid_points)
 
+    if mask is not None:
+        subgrid_idxs = subgrid_idxs[mask]
+
     return subgrid_idxs, subgrid_points, subgrid_shape
 
 
@@ -78,7 +82,7 @@ def interpolate_sparse_predictions(
     pred: TensorType['d', 'h', 'w', '...', torch.float32],
     subgrid_points: List[TensorType['dim', 3, torch.float32]],
     out_shape: torch.Size,
-    scale: int=4,
+    scale: int=2,
 ) -> TensorType['D', 'H', 'W', '...', torch.float32]:
     # compute coordinates of output voxels
     points_down = []
@@ -109,17 +113,28 @@ def interpolate_sparse_predictions(
 def aggregate_sparse_predictions(
     pred_shape: torch.Size,
     patch_idxs: TensorType['P', 3, 2, torch.int64],
-    out_shape: torch.Size,
+    mask: Optional[TensorType['P', torch.bool]]=None,
+    fill_value: Optional[float]=None,
+    out_shape: Optional[torch.Size]=None,
 ) -> TensorType['D', 'H', 'W', '...', torch.float32]:
-    subgrid_idxs, subgrid_points, subgrid_shape = patches_subgrid(patch_idxs)
+    subgrid = patches_subgrid(patch_idxs, mask)
+    subgrid_idxs, subgrid_points, subgrid_shape = subgrid
 
-    out = torch.empty(subgrid_shape + pred_shape, device=patch_idxs.device)
-    pred = torch.empty(pred_shape, device=patch_idxs.device)
+    if fill_value is None:
+        out = torch.empty(subgrid_shape + pred_shape)
+    else:
+        out = torch.full(subgrid_shape + pred_shape, float(fill_value))
+
+    out = out.to(patch_idxs.device)
+    pred = torch.empty(pred_shape).to(patch_idxs.device)
     yield pred
 
     for idxs in subgrid_idxs:
         out[tuple(idxs)] = pred
         yield
+
+    if out_shape is None:
+        yield out
 
     out = interpolate_sparse_predictions(
         out, subgrid_points, out_shape,

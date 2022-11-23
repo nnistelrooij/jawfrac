@@ -168,32 +168,32 @@ class MandibleSegModule(pl.LightningModule):
     def predict_volumes(
         self,
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
-        patch_idxs: TensorType['P', 3, 2, torch.int64],
+        patch_idxs: TensorType['d', 'h', 'w', 3, 2, torch.int64],
     ) -> Tuple[
-        TensorType['D', 'H', 'W', torch.float32],
+        TensorType['D', 'H', 'W', 3, torch.float32],
         TensorType['D', 'H', 'W', torch.float32],
     ]:
+        patch_idxs = patch_idxs[::2, ::2, ::2]
+        subgrid_shape = patch_idxs.shape[:3]
+
         # initialize generators that aggregate predictions
         coords_generator = aggregate_sparse_predictions(
             pred_shape=(3,),
-            patch_idxs=patch_idxs,
-            out_shape=features.shape[1:],
-        )
-        mask_generator = aggregate_dense_predictions(
-            patch_idxs=patch_idxs,
+            patch_idxs=patch_idxs.reshape(-1, 3, 2),
             out_shape=features.shape[1:],
         )
 
         # get initial empty predictions
         coords_pred = next(coords_generator)
-        mask_pred = next(mask_generator)
+        seg = torch.empty(subgrid_shape).to(features)
+        counter = 0
 
         # run the model and aggregate its predictions
         batches = batch_forward(
             model=self,
             features=features,
-            patch_idxs=patch_idxs,
-            x_axis_flip=self.x_axis_flip,
+            patch_idxs=patch_idxs.reshape(-1, 3, 2),
+            x_axis_flip=False,
             batch_size=self.batch_size,
         )
         for coords, masks in batches:
@@ -203,15 +203,59 @@ class MandibleSegModule(pl.LightningModule):
                 next(coords_generator)
 
             for mask in masks:
+                seg[np.unravel_index(counter, subgrid_shape)] = mask.amax()
+                counter += 1
+
+
+        # do any post-processing steps and compute probabilities
+        coords = next(coords_generator)
+        seg = torch.sigmoid(seg)
+
+        return coords, seg
+
+    def finetune_volume(
+        self,
+        features: TensorType['C', 'D', 'H', 'W', torch.float32],
+        patch_idxs: TensorType['d', 'h', 'w', 3, 2, torch.int64],
+        seg: TensorType['d', 'h', 'w', torch.float32],
+        conf_thresh: float=0.1,
+    ) -> TensorType['D', 'H', 'W', torch.float32]:
+        # determine which patches to use for fine-tuning
+        pos_mask = np.zeros(patch_idxs.shape[:3], dtype=bool)
+        pos_mask[::2, ::2, ::2] = (seg >= conf_thresh).cpu().numpy()
+        pos_mask = ndimage.binary_dilation(
+            input=pos_mask,
+            structure=ndimage.generate_binary_structure(3, 3),
+            iterations=1,
+        )
+        pos_mask = torch.from_numpy(pos_mask).to(patch_idxs.device)
+
+        mask_generator = aggregate_dense_predictions(
+            patch_idxs=patch_idxs[pos_mask],
+            out_shape=features.shape[1:],
+        )
+
+        # get initial empty predictions
+        mask_pred = next(mask_generator)
+
+        # run the model and aggregate its predictions
+        batches = batch_forward(
+            model=self,
+            features=features,
+            patch_idxs=patch_idxs[pos_mask],
+            x_axis_flip=self.x_axis_flip,
+            batch_size=self.batch_size,
+        )
+        for _, masks in batches:
+            for mask in masks:
                 mask_pred -= mask_pred
                 mask_pred += mask
                 next(mask_generator)
 
         # do any post-processing steps and compute probabilities
-        coords = next(coords_generator)
         seg = torch.sigmoid(next(mask_generator))
 
-        return coords, seg
+        return seg
 
     def test_step(
         self,
@@ -226,6 +270,7 @@ class MandibleSegModule(pl.LightningModule):
 
         # predict binary segmentation
         coords, seg = self.predict_volumes(features, patch_idxs)
+        seg = self.finetune_volume(features, patch_idxs, seg)
 
         # remove small or low-confidence connected components
         mask = filter_connected_components(
@@ -265,6 +310,7 @@ class MandibleSegModule(pl.LightningModule):
 
         # predict binary segmentation
         coords, seg = self.predict_volumes(features, patch_idxs)
+        seg = self.finetune_volume(features, patch_idxs, seg)
 
         # remove small or low-confidence connected components
         volume_mask = filter_connected_components(

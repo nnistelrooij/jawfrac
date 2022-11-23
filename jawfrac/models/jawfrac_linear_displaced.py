@@ -1,8 +1,8 @@
 from typing import Any, Dict, List, Tuple, Union
 
-import nibabel
 import numpy as np
 import pytorch_lightning as pl
+from scipy import ndimage
 import torch
 from torch.optim.lr_scheduler import _LRScheduler
 from torchmetrics import ConfusionMatrix, Dice, F1Score
@@ -41,7 +41,7 @@ def combine_linear_displaced_predictions(
     displaced_min_component_size: int,
     mean_conf_threshold: float,
     mean_min_component_size: int,
-    verbose: bool,
+    verbose: int,
 ) -> Tuple[
     TensorType['D', 'H', 'W', torch.int64],
     TensorType['D', 'H', 'W', torch.float32],
@@ -63,7 +63,7 @@ def combine_linear_displaced_predictions(
         displaced_conf_threshold, displaced_min_component_size, max_dist,
     )
 
-    if verbose:
+    if verbose >= 2:
         draw_positive_voxels(mandible, linear, displaced, out)
 
     # add components only present in segmentation volume
@@ -225,24 +225,16 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
     def predict_volumes(
         self,
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
-        patch_idxs: TensorType['P', 3, 2, torch.int64],
-    ) -> Tuple[
-        TensorType['D', 'H', 'W', torch.float32],
-        TensorType['D', 'H', 'W', torch.float32],
-    ]:
+        patch_idxs: TensorType['d', 'h', 'w', 3, 2, torch.int64],
+    ) -> TensorType['D', 'H', 'W', torch.float32]:        
         # initialize generators that aggregate predictions
-        mask_generator = aggregate_dense_predictions(
-            patch_idxs=patch_idxs,
-            out_shape=features.shape[1:],
-        )
+        patch_idxs = patch_idxs[::2, ::2, ::2].reshape(-1, 3, 2)
         class_generator = aggregate_sparse_predictions(
             pred_shape=(),
             patch_idxs=patch_idxs,
-            out_shape=features.shape[1:],
         )
 
         # get initial empty predictions
-        mask_pred = next(mask_generator)
         class_pred = next(class_generator)
 
         # run the model and aggregate its predictions
@@ -250,9 +242,63 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             model=self,
             features=features,
             patch_idxs=patch_idxs,
+            x_axis_flip=False,
+            batch_size=self.batch_size,
+        )
+        for _, logits in batches:
+            for logit in logits:
+                class_pred -= class_pred
+                class_pred += logit
+                next(class_generator)
+
+        # do any post-processing steps and compute probabilities
+        displaced = torch.sigmoid(next(class_generator))
+
+        return displaced
+
+    def finetune_volumes(
+        self,
+        features: TensorType['C', 'D', 'H', 'W', torch.float32],
+        patch_idxs: TensorType['d', 'h', 'w', 3, 2, torch.int64],
+        displaced: TensorType['d', 'h', 'w', torch.float32],
+        conf_thresh: float=0.1,
+    ) -> Tuple[
+        TensorType['D', 'H', 'W', torch.float32],        
+        TensorType['D', 'H', 'W', torch.float32],
+    ]:
+        # determine which patches to use for fine-tuning
+        pos_mask = np.zeros(patch_idxs.shape[:3], dtype=bool)
+        pos_mask[::2, ::2, ::2] = (displaced >= conf_thresh).cpu().numpy()
+        pos_mask = ndimage.binary_dilation(
+            input=pos_mask,
+            structure=ndimage.generate_binary_structure(3, 3),
+            iterations=1,
+        )
+        pos_mask = torch.from_numpy(pos_mask).to(patch_idxs.device)
+
+        # initialize generators
+        mask_generator = aggregate_dense_predictions(
+            patch_idxs[pos_mask], features.shape[1:],
+        )
+        class_generator = aggregate_sparse_predictions(
+            pred_shape=(),
+            patch_idxs=patch_idxs.reshape(-1, 3, 2),
+            mask=pos_mask.flatten(),
+            fill_value=-10,
+            out_shape=features.shape[1:],
+        )
+        batches = batch_forward(
+            model=self,
+            features=features,
+            patch_idxs=patch_idxs[pos_mask],
             x_axis_flip=self.x_axis_flip,
             batch_size=self.batch_size,
         )
+
+        # initialize predictions
+        mask_pred = next(mask_generator)
+        class_pred = next(class_generator)
+
         for masks, logits in batches:
             for mask in masks:
                 mask_pred -= mask_pred
@@ -291,7 +337,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         features, mandible, patch_idxs, affine, shape, target = batch
 
         # predict binary segmentations
-        linear, displaced = self.predict_volumes(features, patch_idxs)
+        sparse = self.predict_volume(features, patch_idxs)
+        linear, displaced = self.finetune_volumes(features, patch_idxs, sparse)
         
         components, avg = combine_linear_displaced_predictions(
             mandible, linear, displaced, **self.post_processing,
@@ -373,7 +420,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         features, mandible, patch_idxs, affine, shape = batch
 
         # predict dense binary segmentations
-        linear, displaced = self.predict_volumes(features, patch_idxs)
+        sparse = self.predict_volumes(features, patch_idxs)
+        linear, displaced = self.finetune_volumes(features, patch_idxs, sparse)
 
         # filter small connected components
         mask = combine_linear_displaced_predictions(

@@ -249,20 +249,22 @@ class PatchIndices:
     ) -> Dict[str, Any]:
         # determine start indices of patches along each dimension
         start_idxs = []
+        subgrid_shape = ()
         for dim_size in intensities.shape:
             dim_idxs = list(range(0, dim_size - self.patch_size, self.stride))
             dim_idxs = np.array(dim_idxs + [dim_size - self.patch_size])
 
             start_idxs.append(dim_idxs)
+            subgrid_shape += (dim_idxs.shape[0],)
 
         # determine start and stop indices of patches in all dimensions
-        start_idxs = np.stack(list(product(*start_idxs)))
+        start_idxs = np.stack(np.meshgrid(*start_idxs, indexing='ij'), axis=3)
         stop_idxs = start_idxs + self.patch_size
-        patch_idxs = np.dstack((start_idxs, stop_idxs))
+        patch_idxs = np.stack((start_idxs, stop_idxs), axis=4)
 
         data_dict['intensities'] = intensities
         data_dict['patch_idxs'] = patch_idxs
-        data_dict['patch_classes'] = np.full((patch_idxs.shape[0],), -1)
+        data_dict['patch_classes'] = np.full(patch_idxs.shape[:3], -1)
 
         return data_dict
 
@@ -290,13 +292,16 @@ class BonePatchIndices:
         intensities: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        patches_mask = np.zeros(data_dict['patch_idxs'].shape[0], dtype=bool)
-        for i, patch_idxs in enumerate(data_dict['patch_idxs']):
-            slices = tuple(slice(start, stop) for start, stop in patch_idxs)
-            patch = intensities[slices]
+        patches_mask = np.zeros(data_dict['patch_idxs'].shape[:3], dtype=bool)
+        for i, patch_idxs_x in enumerate(data_dict['patch_idxs']):
+            for j, patch_idxs_y in enumerate(patch_idxs_x):
+                for k, patch_idxs_z in enumerate(patch_idxs_y):
+                    slices = tuple(slice(lo, hi) for lo, hi in patch_idxs_z)
+                    patch = intensities[slices]
 
-            bone_mask = patch >= self.intensity_thresh
-            patches_mask[i] = bone_mask.mean() >= self.volume_thresh
+                    bone_mask = patch >= self.intensity_thresh
+                    bone_patch = bone_mask.mean() >= self.volume_thresh
+                    patches_mask[i, j, k] = bone_patch
 
         data_dict['intensities'] = intensities
         data_dict['patch_idxs'] = data_dict['patch_idxs'][patches_mask]
@@ -974,7 +979,7 @@ class IntensityAsFeatures:
         return data_dict
 
     def __repr__(self) -> str:
-        self.__class__.__name__ + '()'
+        return self.__class__.__name__ + '()'
 
 
 class PositiveNegativePatches:

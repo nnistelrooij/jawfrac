@@ -1,6 +1,6 @@
 work_dir: '/mnt/diag/fractures/CTs/test'
 # work_dir: '/output'
-version: 303
+version: 304
 seed: 0
 
 model:

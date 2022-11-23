@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 
 import nibabel
 import numpy as np
@@ -56,6 +57,11 @@ def infer_mandible():
     nibabel.save(intensities, out_dir / 'main.nii.gz')
     nibabel.save(mandible, out_dir / 'mandible.nii.gz')
 
+
+    # copy original file to output folder
+    shutil.copy(file, out_dir / 'main_source.nii.gz')
+
+
     return shape
 
 
@@ -101,7 +107,7 @@ def infer_fractures(shape):
 
 
     # remove pre-processed volumes
-    (out_dir / 'main.nii.gz').unlink()
+    (out_dir / 'main_source.nii.gz').rename(out_dir / 'main.nii.gz')
     (out_dir / 'mandible_pred.nii.gz').rename(out_dir / 'mandible.nii.gz')
 
 
