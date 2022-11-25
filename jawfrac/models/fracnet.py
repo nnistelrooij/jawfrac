@@ -190,7 +190,7 @@ class FracNet(pl.LightningModule):
             features=features,
             patch_idxs=patch_idxs,
             x_axis_flip=True,
-            batch_size=32,
+            batch_size=40,
         )
         for masks in batches:
             if isinstance(masks, tuple):
@@ -268,6 +268,9 @@ class FracNet(pl.LightningModule):
         ],
         batch_idx: int,
     ) -> TensorType['P', torch.float32]:
+        file = self.trainer.datamodule.predict_dataset.files[batch_idx][0]
+        print(file.parent.stem)
+
         features, patch_idxs, affine, shape = batch
 
         # predict binary segmentation

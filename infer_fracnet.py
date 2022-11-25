@@ -1,3 +1,5 @@
+from time import perf_counter
+
 import nibabel
 import numpy as np
 import pytorch_lightning as pl
@@ -8,9 +10,11 @@ from jawfrac.datamodules import FracNetDataModule
 from jawfrac.models import FracNet
 
 
-def infer():
+def infer(regex_filter: str=''):
     with open('jawfrac/config/fracnet.yaml', 'r') as f:
         config = yaml.safe_load(f)
+        if regex_filter:
+            config['datamodule']['regex_filter'] = regex_filter
 
     pl.seed_everything(config['seed'], workers=True)
 
@@ -34,7 +38,7 @@ def infer():
         devices=1,
         max_epochs=config['model']['epochs'],
     )
-    preds = trainer.test(model, datamodule=dm)
+    preds = trainer.predict(model, datamodule=dm)
 
     for i, pred in enumerate(tqdm(preds)):
         path = dm.root / dm.predict_dataset.files[i][0]
@@ -46,4 +50,44 @@ def infer():
 
 
 if __name__ == '__main__':
-    infer()
+    for regex_filter in [
+        '1',
+        '109',
+        '11',
+        '114',
+        '119',
+        '121',
+        '122',
+        '125',
+        '126',
+        '127',
+        '132',
+        '134',
+        '141',
+        '149',
+        '150',
+        '157',
+        '159',
+        '17',
+        '173',
+        '182',
+        '186',
+        '188',
+        '189',
+        '192',
+        '194',
+        '25',
+        '31',
+        '34',
+        '35',
+        '36',
+        '42',
+        '45',
+        '48',
+        '55',
+        '67',
+    ]:
+        t = perf_counter()
+
+        infer(regex_filter=f'Annotation UK/{regex_filter}/')
+        print(f'Time: {perf_counter() - t}.')

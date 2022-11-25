@@ -20,6 +20,7 @@ from jawfrac.models.common import (
     aggregate_sparse_predictions,
     batch_forward,
     fill_source_volume,
+    half_stride_patch_idxs,
 )
 from jawfrac.visualization import draw_positive_voxels
 
@@ -173,7 +174,7 @@ class MandibleSegModule(pl.LightningModule):
         TensorType['D', 'H', 'W', 3, torch.float32],
         TensorType['D', 'H', 'W', torch.float32],
     ]:
-        patch_idxs = patch_idxs[::2, ::2, ::2]
+        patch_idxs = patch_idxs[half_stride_patch_idxs(patch_idxs)]
         subgrid_shape = patch_idxs.shape[:3]
 
         # initialize generators that aggregate predictions
@@ -221,10 +222,10 @@ class MandibleSegModule(pl.LightningModule):
         conf_thresh: float=0.1,
     ) -> TensorType['D', 'H', 'W', torch.float32]:
         # determine which patches to use for fine-tuning
-        pos_mask = np.zeros(patch_idxs.shape[:3], dtype=bool)
-        pos_mask[::2, ::2, ::2] = (seg >= conf_thresh).cpu().numpy()
+        pos_mask = torch.zeros(patch_idxs.shape[:3]).to(seg.device, torch.bool)
+        pos_mask[half_stride_patch_idxs(patch_idxs)] = seg >= conf_thresh
         pos_mask = ndimage.binary_dilation(
-            input=pos_mask,
+            input=pos_mask.cpu().numpy(),
             structure=ndimage.generate_binary_structure(3, 3),
             iterations=1,
         )

@@ -129,7 +129,7 @@ class FracNetDataModule(VolumeDataModule):
 
             self.predict_dataset = FracNetDataset(
                 stage='predict',
-                files=non_frac_files[:1],
+                files=all_files[:1],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )
@@ -180,7 +180,7 @@ class FracNetDataModule(VolumeDataModule):
         TensorType[3, torch.int64],
     ]:
         features = batch[0]['features']
-        patch_idxs = batch[0]['patch_idxs']
+        patch_idxs = batch[0]['patch_idxs'].reshape(-1, 3, 2)
         affine = batch[0]['affine']
         shape = batch[0]['shape']
 

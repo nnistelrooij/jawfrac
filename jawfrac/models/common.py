@@ -7,6 +7,23 @@ from torchtyping import TensorType
 from tqdm import trange
 
 
+def half_stride_patch_idxs(
+    patch_idxs: TensorType['d', 'h', 'w', 3, 2, torch.int64],
+) -> Tuple[
+    TensorType['D', torch.int64],
+    TensorType['D', torch.int64],
+    TensorType['D', torch.int64],
+]:
+    dimx, dimy, dimz = patch_idxs.shape[:3]
+
+    return torch.meshgrid(
+        torch.arange(0, dimx + 1, 2).clip(0, dimx - 1),
+        torch.arange(0, dimy + 1, 2).clip(0, dimy - 1),
+        torch.arange(0, dimz + 1, 2).clip(0, dimz - 1),
+        indexing='ij',
+    )
+
+
 def batch_forward(
     model: torch.nn.Module,
     features: TensorType['C', 'D', 'H', 'W', torch.float32],

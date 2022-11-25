@@ -333,7 +333,7 @@ class JawFracDataModule(VolumeDataModule):
     ) -> Tuple[
         TensorType['C', 'D', 'H', 'W', torch.float32],
         TensorType['D', 'H', 'W', torch.bool],
-        TensorType['P', 3, 2, torch.int64],
+        TensorType['d', 'h', 'w', 3, 2, torch.int64],
         TensorType['D', 'H', 'W', torch.float32],
     ]:
         features = batch[0]['features']

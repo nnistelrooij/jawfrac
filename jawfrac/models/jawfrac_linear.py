@@ -33,6 +33,7 @@ def filter_connected_components(
     conf_thresh: float,
     min_component_size: int,
     max_dist: float=12.5,
+    verbose: int=0,
 ) -> TensorType['D', 'H', 'W', torch.int64]:
     # determine connected components in volume
     labels = (seg >= conf_thresh).long()
@@ -53,7 +54,8 @@ def filter_connected_components(
         src=seg.flatten(),
         index=component_idxs.flatten(),
     )
-    print(seg.amax())
+    if verbose:
+        print(seg.amax())
     prob_mask = component_probs >= 0.5
 
     # determine components within max_dist voxels of mandible

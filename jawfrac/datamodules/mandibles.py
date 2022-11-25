@@ -169,7 +169,7 @@ class MandibleSegDataModule(VolumeDataModule):
         batch: List[Dict[str, TensorType[..., Any]]],
     ) -> Tuple[
         TensorType['C', 'D', 'H', 'W', torch.float32],
-        TensorType['P', 3, 2, torch.int64],
+        TensorType['d', 'h', 'w', 3, 2, torch.int64],
         TensorType['D', 'H', 'W', torch.float32],
     ]:
         features = batch[0]['features']
@@ -183,7 +183,7 @@ class MandibleSegDataModule(VolumeDataModule):
         batch: List[Dict[str, TensorType[..., Any]]],
     ) -> Tuple[
         TensorType['C', 'D', 'H', 'W', torch.float32],
-        TensorType['P', 3, 2, torch.int64],
+        TensorType['d', 'h', 'w', 3, 2, torch.int64],
         TensorType[4, 4, torch.float32],
         TensorType[3, torch.int64],
     ]:

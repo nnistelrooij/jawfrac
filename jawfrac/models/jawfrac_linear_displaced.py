@@ -16,6 +16,7 @@ from jawfrac.models.common import (
     aggregate_dense_predictions,
     batch_forward,
     fill_source_volume,
+    half_stride_patch_idxs,
 )
 from jawfrac.models.jawfrac_linear import filter_connected_components
 from jawfrac.optim.lr_scheduler import (
@@ -44,6 +45,7 @@ def combine_linear_displaced_predictions(
     verbose: int,
 ) -> Tuple[
     TensorType['D', 'H', 'W', torch.int64],
+    TensorType['P', torch.float32],
     TensorType['D', 'H', 'W', torch.float32],
 ]:
     # make a volume from the combination of both volumes
@@ -51,16 +53,19 @@ def combine_linear_displaced_predictions(
     out = filter_connected_components(
         mandible, avg,
         mean_conf_threshold, mean_min_component_size, max_dist,
+        verbose=verbose,
     )
 
     # filter connected components in each volume separately
     linear = filter_connected_components(
         mandible, linear,
         linear_conf_threshold, linear_min_component_size, max_dist,
+        verbose=verbose,
     )
     displaced = filter_connected_components(
         mandible, displaced,
         displaced_conf_threshold, displaced_min_component_size, max_dist,
+        verbose=verbose,
     )
 
     if verbose >= 2:
@@ -83,7 +88,12 @@ def combine_linear_displaced_predictions(
 
         out[displaced == i] = out.max() + 1
 
-    return out, avg
+    scores = torch.empty(out.max())
+    for i in range(1, out.max() + 1):
+        score = avg[out == i].mean()
+        scores[i - 1] = score
+
+    return out, scores, avg
 
 
 class LinearDisplacedJawFracModule(pl.LightningModule):
@@ -222,16 +232,16 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             'f1/val_masks': self.f1_2,
         })
 
-    def predict_volumes(
+    def predict_volume(
         self,
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
         patch_idxs: TensorType['d', 'h', 'w', 3, 2, torch.int64],
     ) -> TensorType['D', 'H', 'W', torch.float32]:        
         # initialize generators that aggregate predictions
-        patch_idxs = patch_idxs[::2, ::2, ::2].reshape(-1, 3, 2)
+        patch_idxs = patch_idxs[half_stride_patch_idxs(patch_idxs)]
         class_generator = aggregate_sparse_predictions(
             pred_shape=(),
-            patch_idxs=patch_idxs,
+            patch_idxs=patch_idxs.reshape(-1, 3, 2),
         )
 
         # get initial empty predictions
@@ -241,7 +251,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         batches = batch_forward(
             model=self,
             features=features,
-            patch_idxs=patch_idxs,
+            patch_idxs=patch_idxs.reshape(-1, 3, 2),
             x_axis_flip=False,
             batch_size=self.batch_size,
         )
@@ -267,10 +277,10 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         TensorType['D', 'H', 'W', torch.float32],
     ]:
         # determine which patches to use for fine-tuning
-        pos_mask = np.zeros(patch_idxs.shape[:3], dtype=bool)
-        pos_mask[::2, ::2, ::2] = (displaced >= conf_thresh).cpu().numpy()
+        pos_mask = torch.zeros(patch_idxs.shape[:3]).to(displaced.device).bool()
+        pos_mask[half_stride_patch_idxs(patch_idxs)] = displaced >= conf_thresh
         pos_mask = ndimage.binary_dilation(
-            input=pos_mask,
+            input=pos_mask.cpu().numpy(),
             structure=ndimage.generate_binary_structure(3, 3),
             iterations=1,
         )
@@ -332,7 +342,8 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         TensorType[torch.float32],
     ]:
         file = self.trainer.datamodule.test_dataset.files[batch_idx][0]
-        print(file.parent.stem)
+        if self.verbose:
+            print(file.parent.stem)
 
         features, mandible, patch_idxs, affine, shape, target = batch
 
@@ -340,12 +351,13 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         sparse = self.predict_volume(features, patch_idxs)
         linear, displaced = self.finetune_volumes(features, patch_idxs, sparse)
         
-        components, avg = combine_linear_displaced_predictions(
+        components, scores, avg = combine_linear_displaced_predictions(
             mandible, linear, displaced, **self.post_processing,
         )
         mask = components > 0
 
         if self.verbose:
+            print(f'Scores: {scores}')
             draw_fracture_result(mandible, mask, target >= self.conf_thresh)
 
         # compute metrics
@@ -420,7 +432,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         features, mandible, patch_idxs, affine, shape = batch
 
         # predict dense binary segmentations
-        sparse = self.predict_volumes(features, patch_idxs)
+        sparse = self.predict_volume(features, patch_idxs)
         linear, displaced = self.finetune_volumes(features, patch_idxs, sparse)
 
         # filter small connected components
