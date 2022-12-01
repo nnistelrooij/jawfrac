@@ -236,20 +236,20 @@ if __name__ == '__main__':
     #     path / '52' / 'frac_pred.nii.gz',
     # )
 
-    visualize_mandible_fracture(
-        path / '178' / 'Patient178_main_image.nii.gz',
-        path / '178' / 'mandible.nii.gz',
-        path / '178' / 'frac_pred.nii.gz',
-    )
+    # visualize_mandible_fracture(
+    #     path / '178' / 'Patient178_main_image.nii.gz',
+    #     path / '178' / 'mandible.nii.gz',
+    #     path / '178' / 'frac_pred.nii.gz',
+    # )
 
     # visualize_patch(path)
 
-    visualize_mandible(path, path.parent / 'mandible.nii.gz')
+    #visualize_mandible(path, path.parent / 'mandible.nii.gz')
     # visualize_mandible_patch(path)
 
     # visualize_mandible_patch(path, path.parent / 'frac_pred_linear.nii.gz')
 
     visualize_expand_label(
-        path / '81' / 'Patient81_main_image.nii.gz',
-        path / '81' / 'label.nii.gz',
+        path / '48' / 'Patient48_main_image.nii.gz',
+        path / '48' / 'label.nii.gz',
     )

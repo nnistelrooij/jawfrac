@@ -286,6 +286,11 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         )
         pos_mask = torch.from_numpy(pos_mask).to(patch_idxs.device)
 
+        # return without positive patches
+        if not torch.any(pos_mask):
+            return tuple(torch.zeros((2,) + features.shape[1:]).to(features))
+
+
         # initialize generators
         mask_generator = aggregate_dense_predictions(
             patch_idxs[pos_mask], features.shape[1:],

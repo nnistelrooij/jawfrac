@@ -562,8 +562,6 @@ class ExpandLabel:
         labels: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        unique_labels = np.unique(labels)
-
         if self.bone_iters:
             dilation = ndimage.binary_dilation(
                 input=labels == 1,
