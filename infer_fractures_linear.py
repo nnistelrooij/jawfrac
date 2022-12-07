@@ -18,11 +18,12 @@ def infer():
         linear=True,
         displacements=True,
         seed=config['seed'],
+        pass_affine=False,
         **config['datamodule'],
     )
 
     model = LinearJawFracModule.load_from_checkpoint(
-        '/mnt/diag/jawfrac/checkpoints/fractures_linear.ckpt',
+        '/mnt/diag/jawfrac/checkpoints/fractures_linear_no_cascade.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )
@@ -32,7 +33,7 @@ def infer():
         devices=1,
         max_epochs=config['model']['epochs'],
     )
-    preds = trainer.predict(model, datamodule=dm)
+    preds = trainer.test(model, datamodule=dm)
 
     for (file, _), pred in zip(dm.predict_dataset.files, preds):
         pred = pred.cpu().numpy().astype(np.uint16)

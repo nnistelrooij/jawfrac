@@ -1,4 +1,4 @@
-work_dir: '/mnt/diag/fractures/CTs/test'
+work_dir: '/home/mkaailab/Documents/test'
 # work_dir: '/output'
 version: 304
 seed: 0
@@ -44,14 +44,14 @@ model:
 datamodule:
   root: '/mnt/d/nielsvannistelrooij/fractures'
   # root: '/input'
-  root: '/mnt/diag/fractures/CTs/test'
+  root: '/home/mkaailab/Documents/test'
   regex_filter: ''
   val_size: 0.2
   test_size: 0.2
   batch_size: 24
-  num_workers: 1
-  pin_memory: True
-  persistent_workers: True
+  num_workers: 0
+  pin_memory: False
+  persistent_workers: False
   pass_affine: True
   mandible_crop:
     padding: 10.0  # mm

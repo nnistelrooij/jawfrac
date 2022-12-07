@@ -1,4 +1,5 @@
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Dict, Union
 
 import nibabel
@@ -50,6 +51,8 @@ class JawFracDataset(VolumeDataset):
         scan_file: Path,
         mandible_file: Path,
     ) -> Dict[str, NDArray[Any]]:
+        counter = perf_counter()
+
         img = nibabel.load(self.root / scan_file)
         intensities = np.asarray(img.dataobj)
 
@@ -75,6 +78,7 @@ class JawFracDataset(VolumeDataset):
             ),
             'affine': img.affine if self.pass_affine else np.eye(4),
             'shape': np.array(img.header.get_data_shape()),
+            'counter': counter,
         }
 
     def load_target(

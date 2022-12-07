@@ -354,11 +354,13 @@ class JawFracDataModule(VolumeDataModule):
         TensorType['d', 'h', 'w', 3, 2, torch.int64],
         TensorType[4, 4, torch.float32],
         TensorType[3, torch.int64],
+        TensorType[torch.float32],
     ]:
         features = batch[0]['features']
         mandible = batch[0]['mandible']
         patch_idxs = batch[0]['patch_idxs']
         affine = batch[0]['affine']
         shape = batch[0]['shape']
+        counter = batch[0]['counter']
 
-        return features, mandible, patch_idxs, affine, shape
+        return features, mandible, patch_idxs, affine, shape, counter

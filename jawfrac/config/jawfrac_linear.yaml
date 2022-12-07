@@ -21,7 +21,7 @@ model:
     backbone: 'conv'
     channels_list: [16, 32, 64, 128]
     head_kernel_size: 1
-    cascade: True
+    cascade: False
   focal_loss: False
   dice_loss: False
   conf_threshold: 0.1
@@ -31,7 +31,7 @@ model:
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'
   root: '/mnt/diag/fractures'
-  regex_filter: 'Annotation UK/109'
+  regex_filter: 'Annotation UK'
   val_size: 0.2
   test_size: 0.2
   batch_size: 4

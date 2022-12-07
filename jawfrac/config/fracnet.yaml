@@ -19,14 +19,14 @@ model:
   min_component_size: 200
 
 datamodule:
-  root: '/mnt/diag/fractures'
+  root: '/home/mkaailab/Documents/fractures/'
   regex_filter: 'Annotation UK'
   val_size: 0.2
   test_size: 0.2
   batch_size: 4
-  num_workers: 1
+  num_workers: 0
   pin_memory: True
-  persistent_workers: True
+  persistent_workers: False
   regular_spacing: 0.4  # mm
   patch_size: 64
   stride: 48

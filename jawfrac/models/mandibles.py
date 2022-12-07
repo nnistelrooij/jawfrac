@@ -1,3 +1,4 @@
+from time import perf_counter
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
@@ -295,6 +296,7 @@ class MandibleSegModule(pl.LightningModule):
             TensorType['P', 3, 2, torch.int64],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
+            TensorType[torch.float32],
         ],
         batch_idx: int,
     ) -> Tuple[
@@ -303,11 +305,17 @@ class MandibleSegModule(pl.LightningModule):
         TensorType['D', 'H', 'W', torch.bool],
         TensorType[4, 4, torch.float32],
         TensorType[3, torch.int64],
+        TensorType[torch.float32],
+        TensorType[torch.float32],
     ]:
         files = self.trainer.datamodule.predict_dataset.files[batch_idx]
         print(files[0].parent.stem)
         
-        features, patch_idxs, affine, shape = batch
+        features, patch_idxs, affine, shape, counter = batch
+
+        # track processing times
+        preprocess_time = perf_counter() - counter
+        counter = perf_counter()
 
         # predict binary segmentation
         coords, seg = self.predict_volumes(features, patch_idxs)
@@ -321,7 +329,7 @@ class MandibleSegModule(pl.LightningModule):
         # fill volume with original shape given foreground mask
         out = fill_source_volume(volume_mask, affine, shape)
 
-        return features[0], volume_mask, out, affine, shape
+        return features[0], volume_mask, out, affine, shape, preprocess_time, counter
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],

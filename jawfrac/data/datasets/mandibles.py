@@ -1,4 +1,5 @@
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Dict
 
 import nibabel
@@ -38,6 +39,8 @@ class MandibleSegDataset(VolumeDataset):
         self,
         file: Path,
     ) -> Dict[str, NDArray[Any]]:
+        counter = perf_counter()
+
         img = nibabel.load(self.root / file)
         intensities = np.asarray(img.dataobj)
 
@@ -54,6 +57,7 @@ class MandibleSegDataset(VolumeDataset):
             'spacing': np.array(img.header.get_zooms()),
             'orientation': nibabel.io_orientation(img.affine),
             'shape': np.array(img.header.get_data_shape()),
+            'counter': counter,
         }
 
     def load_target(

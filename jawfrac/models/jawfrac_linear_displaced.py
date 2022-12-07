@@ -1,3 +1,4 @@
+from time import perf_counter
 from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
@@ -423,6 +424,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             TensorType['P', 3, 2, torch.int64],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
+            TensorType[torch.float32],
         ],
         batch_idx: int,
     ) -> Tuple[
@@ -430,11 +432,17 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         TensorType['D', 'H', 'W', torch.bool],  
         TensorType[4, 4, torch.float32],
         TensorType[3, torch.int64],
+        TensorType[torch.float32],
+        TensorType[torch.float32],
     ]:
         files = self.trainer.datamodule.predict_dataset.files[batch_idx]
         print(files[0].parent.stem)
 
-        features, mandible, patch_idxs, affine, shape = batch
+        features, mandible, patch_idxs, affine, shape, counter = batch
+
+        # track processing times
+        preprocess_time = perf_counter() - counter
+        counter = perf_counter()
 
         # predict dense binary segmentations
         sparse = self.predict_volume(features, patch_idxs)
@@ -448,7 +456,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         # fill corresponding voxels in source volume
         out = fill_source_volume(mask, affine, shape)
         
-        return mask, out, affine, shape
+        return mask, out, affine, shape, preprocess_time, counter
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],
