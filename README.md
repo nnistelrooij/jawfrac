@@ -46,7 +46,7 @@ Again, specify `work_dir`, `checkpoint_path`, and `root` in `jawfrac/config/frac
 ## Cite
 
 ```
-@masterthesis{
+@mastersthesis{
     author={Niels van Nistelrooij},
     title={JawFracNet: Detecting Mandibular Fractures in CBCT Scans using Three-Stage Deep Neural Network},
     institution={Radboud University},
