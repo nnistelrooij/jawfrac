@@ -2,7 +2,7 @@
 
 Welcome to the repository accompanying the paper *JawFracNet: Detecting Mandibular Fractures through Dense and Sparse Supervision*.
 
-An Algorithm of the method can be tried out at [Grand Challenge](https://grand-challenge.org/algorithms/jaw-frac-net/). Simply upload a NIfTI file containing a mandible and infer where fractures were detected.
+An Algorithm of the method can be tried out at [Grand Challenge](https://grand-challenge.org/algorithms/jawfracnet/). Simply upload a NIfTI file containing a mandible and infer where fractures were detected.
 
 ## Model
 
