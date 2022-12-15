@@ -1,5 +1,5 @@
-work_dir: '/home/mkaailab/Documents/test'
-# work_dir: '/output'
+work_dir: '/home/mkaailab/Documents/jawfrac/test'
+work_dir: '/output'
 version: 304
 seed: 0
 
@@ -42,9 +42,8 @@ model:
     verbose: 1
 
 datamodule:
-  root: '/mnt/d/nielsvannistelrooij/fractures'
-  # root: '/input'
-  root: '/home/mkaailab/Documents/test'
+  root: '/home/mkaailab/Documents/jawfrac/test'
+  root: '/output'
   regex_filter: ''
   val_size: 0.2
   test_size: 0.2

@@ -5,6 +5,7 @@ from time import perf_counter
 import nibabel
 import numpy as np
 import pytorch_lightning as pl
+import SimpleITK as sitk
 import torch
 from torchtyping import TensorType
 import yaml
@@ -22,6 +23,18 @@ def infer_mandible(regex_filter: str='') -> TensorType[3, torch.int64]:
             config['datamodule']['root'] = config['datamodule']['root'] + regex_filter
             config['datamodule']['regex_filter'] = ''
         out_dir = Path(config['work_dir']).resolve()
+
+    uuid = ''
+    for path in Path(config['datamodule']['root']).glob('**/*'):
+        print(path)
+        if path.suffix != '.mha':
+            continue
+
+        img = sitk.ReadImage(path)
+        sitk.WriteImage(img, out_dir / 'image.nii.gz')
+
+        config['datamodule']['root'] = out_dir
+        uuid = path.stem
 
     pl.seed_everything(config['seed'])
 
@@ -72,10 +85,10 @@ def infer_mandible(regex_filter: str='') -> TensorType[3, torch.int64]:
     shutil.copy(file, out_dir / 'main_source.nii.gz')
 
 
-    return shape, preprocess_time, inference_time
+    return uuid, shape, preprocess_time, inference_time
 
 
-def infer_fractures(shape: TensorType[3, torch.int64]):
+def infer_fractures(uuid: str, shape: TensorType[3, torch.int64]):
     with open('jawfrac/config/jawfrac_linear_displaced.yaml') as f:
         config = yaml.safe_load(f)
         out_dir = Path(config['work_dir']).resolve()
@@ -109,7 +122,7 @@ def infer_fractures(shape: TensorType[3, torch.int64]):
 
     # save fractures segmentation of original volume to storage
     file = dm.root / dm.predict_dataset.files[0][0]
-    img = nibabel.load(file)
+    img = nibabel.load(file.parent / 'main_source.nii.gz')
 
     out = out.cpu().numpy().astype(np.uint16)
     img = nibabel.Nifti1Image(out, img.affine)
@@ -121,6 +134,18 @@ def infer_fractures(shape: TensorType[3, torch.int64]):
     # remove pre-processed volumes
     (out_dir / 'main_source.nii.gz').rename(out_dir / 'main.nii.gz')
     (out_dir / 'mandible_pred.nii.gz').rename(out_dir / 'mandible.nii.gz')
+
+    # convert to .mha files
+    if uuid:
+        img = sitk.ReadImage(out_dir / 'mandible.nii.gz')
+        mha_dir = out_dir / 'images' / 'mandible-segmentation'
+        mha_dir.mkdir(parents=True)
+        sitk.WriteImage(img, mha_dir / f'{uuid}.mha')
+
+        img = sitk.ReadImage(out_dir / 'fractures.nii.gz')
+        mha_dir = out_dir / 'images' / 'fractures'
+        mha_dir.mkdir(parents=True)
+        sitk.WriteImage(img, mha_dir / f'{uuid}.mha')
 
     return preprocess_time, inference_time
 
@@ -139,8 +164,8 @@ if __name__ == '__main__':
             print('NO MANDIBLE')
             continue
         
-        shape, preprocess1_time, mandible_time = out        
-        preprocess2_time, fractures_time = infer_fractures(shape)
+        uuid, shape, preprocess1_time, mandible_time = out        
+        preprocess2_time, fractures_time = infer_fractures(uuid, shape)
 
         preprocess_times.append(preprocess1_time + preprocess2_time)
         mandible_times.append(mandible_time)

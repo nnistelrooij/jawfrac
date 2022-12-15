@@ -39,7 +39,7 @@ def infer(regex_filter: str=''):
         devices=1,
         max_epochs=config['model']['epochs'],
     )
-    preds = trainer.predict(model, datamodule=dm)
+    preds = trainer.test(model, datamodule=dm)
 
     for i, pred in enumerate(tqdm(preds)):
         path = dm.root / dm.predict_dataset.files[i][0]
@@ -51,6 +51,9 @@ def infer(regex_filter: str=''):
 
 
 if __name__ == '__main__':
+    infer()
+
+
     times = []
     for regex_filter in [
         # 'Annotation UK/1/', 'Annotation UK/109/', 'Annotation UK/11/', 'Annotation UK/114/', 'Annotation UK/119/', 'Annotation UK/121/', 'Annotation UK/122/', 'Annotation UK/125/', 'Annotation UK/126/', 'Annotation UK/127/', 'Annotation UK/132/', 'Annotation UK/134/', 'Annotation UK/141/', 'Annotation UK/149/', 'Annotation UK/150/', 'Annotation UK/157/', 'Annotation UK/159/', 'Annotation UK/17/', 'Annotation UK/173/', 'Annotation UK/182/', 'Annotation UK/186/', 'Annotation UK/188/', 'Annotation UK/189/', 'Annotation UK/192/', 'Annotation UK/194/', 'Annotation UK/25/', 'Annotation UK/31/', 'Annotation UK/34/', 'Annotation UK/35/', 'Annotation UK/36/', 'Annotation UK/42/', 'Annotation UK/45/', 'Annotation UK/48/', 'Annotation UK/55/', 'Annotation UK/67/',

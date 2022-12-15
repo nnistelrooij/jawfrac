@@ -26,8 +26,8 @@ class FracNetDataset(VolumeDataset):
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
             T.PatchIndices(patch_size=patch_size, stride=stride),
+            T.BonePatchIndices(),
             *((
-                T.BonePatchIndices(),
                 T.LinearFracturePatchIndices(patch_size=patch_size),
                 T.DisplacedFracturePatchIndices(patch_size=patch_size),
                 T.ExpandLabel(**expand_label),

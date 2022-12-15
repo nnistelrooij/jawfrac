@@ -1,5 +1,6 @@
 work_dir: '/mnt/d/nielsvannistelrooij/logs'
-work_dir: '/home/mkaailab/Documents/test'
+work_dir: '/home/mkaailab/Documents/jawfrac/test'
+work_dir: '/output'
 version: 101
 seed: 0
 
@@ -20,9 +21,9 @@ model:
   x_axis_flip: True
 
 datamodule:
-  # root: '/mnt/diag/nielsvannistelrooij/Fabian'
-  root: '/home/mkaailab/Documents/Fabian/'
-  regex_filter: 'Annotation UK/17'
+  root: '/home/mkaailab/Documents/jawfrac/test'
+  root: '/input'
+  regex_filter: ''
   val_size: 0.2
   test_size: 0.0
   batch_size: 40

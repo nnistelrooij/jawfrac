@@ -92,7 +92,7 @@ class MandibleSegModule(pl.LightningModule):
 
         self.model = nn.MandibleNet(**model_cfg)
         self.criterion = nn.MandibleLoss(focal_loss, dice_loss)
-        self.f1 = F1Score(num_classes=2, average='macro')
+        self.f1 = F1Score(task='multiclass', num_classes=2, average='macro')
         self.iou = BinaryJaccardIndex()
         self.dice = Dice(multiclass=False)
 
@@ -220,7 +220,7 @@ class MandibleSegModule(pl.LightningModule):
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
         patch_idxs: TensorType['d', 'h', 'w', 3, 2, torch.int64],
         seg: TensorType['d', 'h', 'w', torch.float32],
-        conf_thresh: float=0.1,
+        conf_thresh: float=0.5,
     ) -> TensorType['D', 'H', 'W', torch.float32]:
         # determine which patches to use for fine-tuning
         pos_mask = torch.zeros(patch_idxs.shape[:3]).to(seg.device, torch.bool)

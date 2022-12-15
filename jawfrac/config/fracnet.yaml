@@ -31,9 +31,9 @@ datamodule:
   patch_size: 64
   stride: 48
   expand_label:
-    bone_iters: 0
-    all_iters: 0
-    smooth: 0.0
+    bone_iters: 1
+    all_iters: 1
+    smooth: 0.5
     negative_iters: 16
   max_patches_per_scan: 4
 

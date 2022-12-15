@@ -25,7 +25,7 @@ docker run --rm \
 docker run --rm \
         -v JawFracNet-output:/output/ \
         -v $SCRIPTPATH/test/:/input/ \
-        python:3.9-slim python3 -c "from pathlib import Path; assert Path('/output/fractures.nii.gz').exists()"
+        python:3.9-slim python3 -c "from pathlib import Path; assert len(list(Path('/output/images').glob('*'))) == 2"
 
 if [ $? -eq 0 ]; then
     echo "Tests successfully passed..."

@@ -112,8 +112,8 @@ class LinearJawFracModule(pl.LightningModule):
 
         self.criterion = nn.SegmentationLoss(focal_loss, dice_loss)
 
-        self.confmat = ConfusionMatrix(num_classes=2)
-        self.f1 = F1Score(num_classes=2, average='macro')
+        self.confmat = ConfusionMatrix(task='multiclass', num_classes=2)
+        self.f1 = F1Score(task='multiclass', num_classes=2, average='macro')
         self.iou = BinaryJaccardIndex()
         self.dice = Dice(multiclass=False)
         self.precision_metric = FracPrecision()
@@ -195,7 +195,7 @@ class LinearJawFracModule(pl.LightningModule):
     ) -> TensorType['D', 'H', 'W', torch.float32]:
         # initialize generator that aggregates predictions
         mask_generator = aggregate_dense_predictions(
-            patch_idxs=patch_idxs,
+            patch_idxs=patch_idxs.reshape(-1, 3, 2),
             out_shape=features.shape[1:],
         )
 
@@ -206,7 +206,7 @@ class LinearJawFracModule(pl.LightningModule):
         batches = batch_forward(
             model=self,
             features=features,
-            patch_idxs=patch_idxs,
+            patch_idxs=patch_idxs.reshape(-1, 3, 2),
             x_axis_flip=True,
             batch_size=32,
         )
@@ -281,7 +281,7 @@ class LinearJawFracModule(pl.LightningModule):
         self,
         outputs: List[TensorType['D', 'H', 'W', torch.float32]],
     ) -> None:
-        torch.save(outputs, '/mnt/d/nielsvannistelrooij/outputs_2.pth')
+        # torch.save(outputs, '/mnt/d/nielsvannistelrooij/outputs_2.pth')
         
         draw_confusion_matrix(self.confmat.compute())
 
@@ -293,10 +293,11 @@ class LinearJawFracModule(pl.LightningModule):
             TensorType['P', 3, 2, torch.int64],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
+            TensorType[torch.float32],
         ],
         batch_idx: int,
     ) -> TensorType['P', torch.float32]:
-        features, mandible, patch_idxs, affine, shape = batch
+        features, mandible, patch_idxs, affine, shape, _ = batch
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)

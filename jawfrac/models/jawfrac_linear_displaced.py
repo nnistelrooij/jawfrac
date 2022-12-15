@@ -137,9 +137,9 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         # initialize loss function
         self.criterion = nn.JawFracLoss(num_classes)
 
-        self.confmat = ConfusionMatrix(num_classes=2)
-        self.f1_1 = F1Score(num_classes=2, average='macro')
-        self.f1_2 = F1Score(num_classes=2, average='macro')
+        self.confmat = ConfusionMatrix(task='multiclass', num_classes=2)
+        self.f1_1 = F1Score(task='multiclass', num_classes=2, average='macro')
+        self.f1_2 = F1Score(task='multiclass', num_classes=2, average='macro')
         self.iou = BinaryJaccardIndex()
         self.dice = Dice(multiclass=False)
         self.precision_metric = FracPrecision()

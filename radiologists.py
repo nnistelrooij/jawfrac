@@ -1,11 +1,12 @@
-from typing import Sequence
+import datetime
 from pathlib import Path
-import shutil
+from typing import List, Sequence
 
 import matplotlib.pyplot as plt
 import nibabel
 import numpy as np
 import pandas as pd
+from scipy import ndimage
 from sklearn.metrics import ConfusionMatrixDisplay
 import torch
 from torchtyping import TensorType
@@ -15,10 +16,46 @@ import jawfrac.data.transforms as T
 from jawfrac.metrics import FracPrecision, FracRecall
 
 
-def compute_times(path: Path):
-    df = pd.read_csv(path)
+def count_annotations(
+    gt_file: Path,
+    root: Path,
+    key: List[str],
+) -> None:
+    gt = pd.read_csv(gt_file)
 
-    times = pd.to_timedelta(df['T3'])
+    displaced_total, linear_total = 0, 0
+    for i, file in enumerate(key, 1):
+        if 'Controls' in file:
+            continue
+
+        idx = int(Path(file).parent.stem)
+        wolla = gt.iloc[idx - 1]['Displaced']
+        displaced = wolla.split(',') if isinstance(wolla, str) else []
+        wolla = gt.iloc[idx - 1]['Linear']
+        linear = wolla.split(',') if isinstance(wolla, str) else []
+        gt_count = len(displaced) + len(linear)
+        displaced_total += len(displaced)
+        linear_total += len(linear)
+
+        scan_dir = root / f'scan{i}'
+        anns = [a.stem for a in scan_dir.glob('*nii.gz')]
+        anns = [a for a in anns if 'No' not in a and 'scan' not in a]
+        ann_count = len(anns)
+
+        if gt_count != ann_count:
+            print(i, ':', file)
+
+
+def compute_times(path: Path, radiologist: str):
+    df = pd.read_excel(path, sheet_name=radiologist)
+
+    times = [str(t) for t in df['T3']]
+    minutes = [int(t.split(':')[1]) for t in times]
+    seconds = [int(t.split(':')[2]) for t in times]
+
+    times2 = [datetime.timedelta(minutes=m, seconds=s) for m, s in zip(minutes, seconds)]
+
+    times = pd.Series(times2)
 
     p_avg, p_std = times[has_fracture].mean(), times[has_fracture].std()
     print(f'Patient time: {p_avg} +- {p_std}.')
@@ -33,9 +70,10 @@ def compute_times(path: Path):
 def confusion_matrix(
     path: Path,
     has_fracture: Sequence[bool],
-    verbose=False,
+    radiologist: str,
+    verbose=True,
 ):
-    df = pd.read_csv(path)
+    df = pd.read_excel(path, sheet_name=radiologist)
 
     radiologist_fracture = df['Fracture'].isna().tolist()
 
@@ -75,8 +113,16 @@ def combine_annotations(
     seg_files = [f for f in root.glob('*') if 'scan.nii.gz' not in str(f)]
     seg_files = [f for f in seg_files if 'original' not in str(f)]
     for seg_file in seg_files:
+        if 'nii.gz' not in str(seg_file):
+            continue
+
         img = nibabel.load(seg_file)
         data = np.asarray(img.dataobj).astype(np.int16)
+        data = ndimage.binary_dilation(
+            input=data,
+            structure=ndimage.generate_binary_structure(3, 2),
+            iterations=2,
+        )
         data_dict = {
             'intensities': intensities,
             'labels': data,
@@ -143,6 +189,8 @@ root = Path('/mnt/diag/fractures')
 with open(root / 'Radiologists' / 'key.txt', 'r') as f:
     key = [l.strip() for l in f.readlines() if l.strip()]
 
+gt_file = root / 'Sophie overview 3.0.csv'
+excel_file = root / 'Radiologists' / 'Timed2.xlsx'
 has_fracture = pd.Series(['Annotation' in f for f in key])
 
 
@@ -151,14 +199,17 @@ recall_metric = FracRecall(voxel_thresh=(1, 1000))
 
 for radiologist in [
     'Pieter van Lierop',
+    'dr. Alessandro Tel',
+    'dr. Marcel Hanisch',
 ]:
     print(radiologist)
 
     radiologist_root = root / 'Radiologists' / radiologist
-    compute_times(radiologist_root / 'times.csv')
-    confusion_matrix(radiologist_root / 'times.csv', has_fracture)
+    count_annotations(gt_file, radiologist_root, key)
+    compute_times(excel_file, radiologist)
+    confusion_matrix(excel_file, has_fracture, radiologist)
 
-    tqdm_iter = tqdm(key)
+    tqdm_iter = tqdm(key[22:])
     for i, path in enumerate(tqdm_iter, 1):
         if 'Controls' in path:
             continue

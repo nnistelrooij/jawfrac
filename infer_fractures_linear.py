@@ -23,7 +23,7 @@ def infer():
     )
 
     model = LinearJawFracModule.load_from_checkpoint(
-        '/mnt/diag/jawfrac/checkpoints/fractures_linear_no_cascade.ckpt',
+        '/mnt/diag/jawfrac/checkpoints/fractures_linear.ckpt',
         num_classes=dm.num_classes,
         **config['model'],
     )
@@ -41,7 +41,7 @@ def infer():
         img = nibabel.load(dm.root / file)
         affine = img.affine
 
-        file = file.parent / 'frac_pred_all.nii.gz'
+        file = file.parent / 'frac_pred_first_network.nii.gz'
         img = nibabel.Nifti1Image(pred, affine)
         nibabel.save(img, dm.root / file)
 
