@@ -45,6 +45,8 @@ Again, specify `work_dir`, `checkpoint_path`, and `root` in `jawfrac/config/frac
 
 ## Cite
 
+[Link to thesis](https://drive.google.com/file/d/1GYfgMn_ilXPVaxRsmNRaMZn2XRQxZnEd/view?usp=share_link)
+
 ```
 @mastersthesis{
     author={Niels van Nistelrooij},
