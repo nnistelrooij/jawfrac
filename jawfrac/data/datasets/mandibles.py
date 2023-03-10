@@ -45,7 +45,7 @@ class MandibleSegDataset(VolumeDataset):
         intensities = np.asarray(img.dataobj)
 
         # convert 8-bit to 12-bit
-        if intensities.min() == 0 and intensities.max() == 255:
+        if intensities.min() == 0 and intensities.max() <= 255:
             center = intensities[intensities > 0].mean()
             intensities = (intensities - center) / 255 * 4095
 
