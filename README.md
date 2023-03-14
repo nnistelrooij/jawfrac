@@ -1,6 +1,6 @@
 # JawFrac
 
-Welcome to the repository accompanying the paper *JawFracNet: Detecting Mandibular Fractures in CBCT Scans using Three-Stage Deep Neural Network*.
+Welcome to the repository accompanying the Master's thesis *JawFracNet: Detecting Mandibular Fractures in CBCT Scans using Three-Stage Deep Neural Network*.
 
 An Algorithm of the method can be tried out at [Grand Challenge](https://grand-challenge.org/algorithms/jawfracnet/). Simply upload a NIfTI file containing a mandible and infer where fractures are detected.
 
@@ -56,3 +56,5 @@ Again, specify `work_dir`, `checkpoint_path`, and `root` in `jawfrac/config/frac
     month={12},
 }
 ```
+
+A journal article will be published to Medical Image Analysis soon!
