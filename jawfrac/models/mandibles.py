@@ -1,4 +1,3 @@
-from time import perf_counter
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
@@ -92,7 +91,7 @@ class MandibleSegModule(pl.LightningModule):
 
         self.model = nn.MandibleNet(**model_cfg)
         self.criterion = nn.MandibleLoss(focal_loss, dice_loss)
-        self.f1 = F1Score(task='multiclass', num_classes=2, average='macro')
+        self.f1 = F1Score(task='binary', num_classes=2, average='macro')
         self.iou = BinaryJaccardIndex()
         self.dice = Dice(multiclass=False)
 
@@ -220,7 +219,7 @@ class MandibleSegModule(pl.LightningModule):
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
         patch_idxs: TensorType['d', 'h', 'w', 3, 2, torch.int64],
         seg: TensorType['d', 'h', 'w', torch.float32],
-        conf_thresh: float=0.5,
+        conf_thresh: float=0.1,
     ) -> TensorType['D', 'H', 'W', torch.float32]:
         # determine which patches to use for fine-tuning
         pos_mask = torch.zeros(patch_idxs.shape[:3]).to(seg.device, torch.bool)
@@ -296,7 +295,6 @@ class MandibleSegModule(pl.LightningModule):
             TensorType['P', 3, 2, torch.int64],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
-            TensorType[torch.float32],
         ],
         batch_idx: int,
     ) -> Tuple[
@@ -305,31 +303,29 @@ class MandibleSegModule(pl.LightningModule):
         TensorType['D', 'H', 'W', torch.bool],
         TensorType[4, 4, torch.float32],
         TensorType[3, torch.int64],
-        TensorType[torch.float32],
-        TensorType[torch.float32],
     ]:
         files = self.trainer.datamodule.predict_dataset.files[batch_idx]
         print(files[0].parent.stem)
         
-        features, patch_idxs, affine, shape, counter = batch
-
-        # track processing times
-        preprocess_time = perf_counter() - counter
-        counter = perf_counter()
+        features, patch_idxs, affine, shape = batch
 
         # predict binary segmentation
         coords, seg = self.predict_volumes(features, patch_idxs)
         seg = self.finetune_volume(features, patch_idxs, seg)
 
+        # fill volume with original shape given foreground mask
+        volume_probs = fill_source_volume(seg, affine, shape)
+
         # remove small or low-confidence connected components
         volume_mask = filter_connected_components(
-            coords, seg, self.conf_thresh, self.min_component_size, self.max_dist,
+            torch.zeros(volume_probs.shape + (3,)).to(coords),
+            volume_probs,
+            self.conf_thresh, 
+            self.min_component_size,
+            self.max_dist,
         )
 
-        # fill volume with original shape given foreground mask
-        out = fill_source_volume(volume_mask, affine, shape)
-
-        return features[0], volume_mask, out, affine, shape, preprocess_time, counter
+        return features[0], volume_probs, volume_mask, affine, shape
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],

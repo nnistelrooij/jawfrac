@@ -296,8 +296,8 @@ if __name__ == '__main__':
     import warnings
     warnings.filterwarnings('ignore')
 
-    p = Pool(cpu_count())
-    root = Path('/mnt/diag/nielsvannistelrooij/Fabian')
+    p = Pool(2)
+    root = Path('/mnt/diag/Fabian')
 
     # remove_nifti_files(root)
     write_nifti_files(root)

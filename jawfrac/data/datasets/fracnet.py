@@ -26,8 +26,8 @@ class FracNetDataset(VolumeDataset):
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
             T.PatchIndices(patch_size=patch_size, stride=stride),
-            T.BonePatchIndices(),
             *((
+                T.BonePatchIndices(),
                 T.LinearFracturePatchIndices(patch_size=patch_size),
                 T.DisplacedFracturePatchIndices(patch_size=patch_size),
                 T.ExpandLabel(**expand_label),
@@ -46,7 +46,7 @@ class FracNetDataset(VolumeDataset):
         intensities = np.asarray(img.dataobj)
 
         # convert 8-bit to 12-bit
-        if intensities.min() == 0 and intensities.max() <= 255:
+        if intensities.min() == 0 and intensities.max() == 255:
             center = intensities[intensities > 0].mean()
             intensities = (intensities - center) / 255 * 4095
 

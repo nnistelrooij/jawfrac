@@ -64,12 +64,13 @@ class MandibleSegDataModule(VolumeDataModule):
         return files
 
     def _files(self, stage: str) -> List[Tuple[Path, ...]]:
-        scan_files = self._filter_files('**/image.nii.gz')
+        scan_files = self._filter_files('**/*_*.nii.gz')
 
         if stage == 'predict':
             return list(zip(scan_files))
 
-        seg_files = self._filter_files('**/seg.nii.gz')
+        seg_files = self._filter_files('**/*_*.nii.gz')
+        seg_files = sorted(set(seg_files) - set(scan_files))
 
         return list(zip(scan_files, seg_files))
 
@@ -125,7 +126,7 @@ class MandibleSegDataModule(VolumeDataModule):
             
             non_mandible_files = []
             for files in all_files:
-                mandible_file = self.root / files[0].parent / 'mandible.nii.gz'
+                mandible_file = self.root / files[0].parent / f'{files[0].stem[:-9]}.nii.gz'
                 if mandible_file.exists():
                     continue
                 
@@ -133,7 +134,7 @@ class MandibleSegDataModule(VolumeDataModule):
 
             self.predict_dataset = MandibleSegDataset(
                 stage='predict',
-                files=all_files[:1],
+                files=non_mandible_files[:1],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )
@@ -186,12 +187,10 @@ class MandibleSegDataModule(VolumeDataModule):
         TensorType['d', 'h', 'w', 3, 2, torch.int64],
         TensorType[4, 4, torch.float32],
         TensorType[3, torch.int64],
-        TensorType[torch.float32],
     ]:
         features = batch[0]['features']
         patch_idxs = batch[0]['patch_idxs']
         affine = batch[0]['affine']
         shape = batch[0]['shape']
-        counter = batch[0]['counter']
 
-        return features, patch_idxs, affine, shape, counter
+        return features, patch_idxs, affine, shape

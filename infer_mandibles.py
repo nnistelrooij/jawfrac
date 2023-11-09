@@ -38,9 +38,9 @@ def infer():
         affine = img.affine
 
         # save to storage
-        volume = volume.cpu().numpy().astype(np.uint16)
+        volume = volume[2].cpu().numpy().astype(np.uint8)
         img = nibabel.Nifti1Image(volume, affine)
-        nibabel.save(img, path.parent / 'mandible.nii.gz')
+        nibabel.save(img, path.parent / f'{path.stem[:-9]}.nii.gz')
 
 
 if __name__ == '__main__':

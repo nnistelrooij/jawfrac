@@ -1,10 +1,10 @@
 from pathlib import Path
-from time import perf_counter
 from typing import Any, Dict
 
 import nibabel
 import numpy as np
 from numpy.typing import NDArray
+from scipy import ndimage
 
 from jawfrac.data.datasets.base import VolumeDataset
 import jawfrac.data.transforms as T
@@ -22,7 +22,7 @@ class MandibleSegDataset(VolumeDataset):
         **kwargs: Dict[str, Any],
     ) -> None:
         pre_transform = T.Compose(
-            T.NonNegativeCrop(),
+            # T.NonNegativeCrop(),
             T.RegularSpacing(spacing=regular_spacing),
             T.NaturalHeadPositionOrient(),
             T.PatchIndices(patch_size=patch_size, stride=stride),
@@ -39,13 +39,11 @@ class MandibleSegDataset(VolumeDataset):
         self,
         file: Path,
     ) -> Dict[str, NDArray[Any]]:
-        counter = perf_counter()
-
         img = nibabel.load(self.root / file)
         intensities = np.asarray(img.dataobj)
 
         # convert 8-bit to 12-bit
-        if intensities.min() == 0 and intensities.max() <= 255:
+        if intensities.min() == 0 and intensities.max() == 255:
             center = intensities[intensities > 0].mean()
             intensities = (intensities - center) / 255 * 4095
 
@@ -57,7 +55,6 @@ class MandibleSegDataset(VolumeDataset):
             'spacing': np.array(img.header.get_zooms()),
             'orientation': nibabel.io_orientation(img.affine),
             'shape': np.array(img.header.get_data_shape()),
-            'counter': counter,
         }
 
     def load_target(
@@ -67,6 +64,15 @@ class MandibleSegDataset(VolumeDataset):
         seg = nibabel.load(self.root / file)
         labels = np.asarray(seg.dataobj)
 
+        labels = ndimage.binary_closing(
+            labels == 1, ndimage.generate_binary_structure(3, 3),
+        )
+
+        print(file)
+
+        if file.stem == 'condyle_238.nii':
+            k  = 3
+
         return {
-            'labels': labels == 2,
+            'labels': labels,
         }

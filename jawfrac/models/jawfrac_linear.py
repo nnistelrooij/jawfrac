@@ -33,7 +33,6 @@ def filter_connected_components(
     conf_thresh: float,
     min_component_size: int,
     max_dist: float=12.5,
-    verbose: int=0,
 ) -> TensorType['D', 'H', 'W', torch.int64]:
     # determine connected components in volume
     labels = (seg >= conf_thresh).long()
@@ -54,8 +53,7 @@ def filter_connected_components(
         src=seg.flatten(),
         index=component_idxs.flatten(),
     )
-    if verbose:
-        print(seg.amax())
+    print(seg.amax())
     prob_mask = component_probs >= 0.5
 
     # determine components within max_dist voxels of mandible
@@ -112,8 +110,8 @@ class LinearJawFracModule(pl.LightningModule):
 
         self.criterion = nn.SegmentationLoss(focal_loss, dice_loss)
 
-        self.confmat = ConfusionMatrix(task='multiclass', num_classes=2)
-        self.f1 = F1Score(task='multiclass', num_classes=2, average='macro')
+        self.confmat = ConfusionMatrix(num_classes=2)
+        self.f1 = F1Score(num_classes=2, average='macro')
         self.iou = BinaryJaccardIndex()
         self.dice = Dice(multiclass=False)
         self.precision_metric = FracPrecision()
@@ -195,7 +193,7 @@ class LinearJawFracModule(pl.LightningModule):
     ) -> TensorType['D', 'H', 'W', torch.float32]:
         # initialize generator that aggregates predictions
         mask_generator = aggregate_dense_predictions(
-            patch_idxs=patch_idxs.reshape(-1, 3, 2),
+            patch_idxs=patch_idxs,
             out_shape=features.shape[1:],
         )
 
@@ -206,7 +204,7 @@ class LinearJawFracModule(pl.LightningModule):
         batches = batch_forward(
             model=self,
             features=features,
-            patch_idxs=patch_idxs.reshape(-1, 3, 2),
+            patch_idxs=patch_idxs,
             x_axis_flip=True,
             batch_size=32,
         )
@@ -281,7 +279,7 @@ class LinearJawFracModule(pl.LightningModule):
         self,
         outputs: List[TensorType['D', 'H', 'W', torch.float32]],
     ) -> None:
-        # torch.save(outputs, '/mnt/d/nielsvannistelrooij/outputs_2.pth')
+        torch.save(outputs, '/mnt/d/nielsvannistelrooij/outputs_2.pth')
         
         draw_confusion_matrix(self.confmat.compute())
 
@@ -293,11 +291,10 @@ class LinearJawFracModule(pl.LightningModule):
             TensorType['P', 3, 2, torch.int64],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
-            TensorType[torch.float32],
         ],
         batch_idx: int,
     ) -> TensorType['P', torch.float32]:
-        features, mandible, patch_idxs, affine, shape, _ = batch
+        features, mandible, patch_idxs, affine, shape = batch
 
         # predict binary segmentation
         x = self.predict_volume(features, patch_idxs)

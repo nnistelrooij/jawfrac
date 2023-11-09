@@ -61,10 +61,10 @@ class FracRecall(Metric):
             centroid = pred_voxels.float().mean(dim=0)
 
             for j, target_voxels in enumerate(targets):
-                dists = torch.sqrt(torch.sum((target_voxels - centroid) ** 2, dim=1))
-                target_counts[i, j] = (dists <= self.dist_thresh).sum()
+                dists = torch.sum((target_voxels - centroid) ** 2, dim=1)
+                target_counts[i, j] = (dists <= self.dist_thresh ** 2).sum()
 
-        return target_counts
+        return target_counts      
 
     def update(
         self,

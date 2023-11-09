@@ -1,4 +1,3 @@
-from time import perf_counter
 from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
@@ -46,7 +45,6 @@ def combine_linear_displaced_predictions(
     verbose: int,
 ) -> Tuple[
     TensorType['D', 'H', 'W', torch.int64],
-    TensorType['P', torch.float32],
     TensorType['D', 'H', 'W', torch.float32],
 ]:
     # make a volume from the combination of both volumes
@@ -54,19 +52,16 @@ def combine_linear_displaced_predictions(
     out = filter_connected_components(
         mandible, avg,
         mean_conf_threshold, mean_min_component_size, max_dist,
-        verbose=verbose,
     )
 
     # filter connected components in each volume separately
     linear = filter_connected_components(
         mandible, linear,
         linear_conf_threshold, linear_min_component_size, max_dist,
-        verbose=verbose,
     )
     displaced = filter_connected_components(
         mandible, displaced,
         displaced_conf_threshold, displaced_min_component_size, max_dist,
-        verbose=verbose,
     )
 
     if verbose >= 2:
@@ -89,12 +84,7 @@ def combine_linear_displaced_predictions(
 
         out[displaced == i] = out.max() + 1
 
-    scores = torch.empty(out.max())
-    for i in range(1, out.max() + 1):
-        score = avg[out == i].mean()
-        scores[i - 1] = score
-
-    return out, scores, avg
+    return out, avg
 
 
 class LinearDisplacedJawFracModule(pl.LightningModule):
@@ -137,9 +127,9 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         # initialize loss function
         self.criterion = nn.JawFracLoss(num_classes)
 
-        self.confmat = ConfusionMatrix(task='multiclass', num_classes=2)
-        self.f1_1 = F1Score(task='multiclass', num_classes=2, average='macro')
-        self.f1_2 = F1Score(task='multiclass', num_classes=2, average='macro')
+        self.confmat = ConfusionMatrix(num_classes=2)
+        self.f1_1 = F1Score(num_classes=2, average='macro')
+        self.f1_2 = F1Score(num_classes=2, average='macro')
         self.iou = BinaryJaccardIndex()
         self.dice = Dice(multiclass=False)
         self.precision_metric = FracPrecision()
@@ -233,7 +223,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             'f1/val_masks': self.f1_2,
         })
 
-    def predict_volume(
+    def predict_volumes(
         self,
         features: TensorType['C', 'D', 'H', 'W', torch.float32],
         patch_idxs: TensorType['d', 'h', 'w', 3, 2, torch.int64],
@@ -286,11 +276,6 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             iterations=1,
         )
         pos_mask = torch.from_numpy(pos_mask).to(patch_idxs.device)
-
-        # return without positive patches
-        if not torch.any(pos_mask):
-            return tuple(torch.zeros((2,) + features.shape[1:]).to(features))
-
 
         # initialize generators
         mask_generator = aggregate_dense_predictions(
@@ -348,8 +333,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         TensorType[torch.float32],
     ]:
         file = self.trainer.datamodule.test_dataset.files[batch_idx][0]
-        if self.verbose:
-            print(file.parent.stem)
+        print(file.parent.stem)
 
         features, mandible, patch_idxs, affine, shape, target = batch
 
@@ -357,13 +341,12 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         sparse = self.predict_volume(features, patch_idxs)
         linear, displaced = self.finetune_volumes(features, patch_idxs, sparse)
         
-        components, scores, avg = combine_linear_displaced_predictions(
+        components, avg = combine_linear_displaced_predictions(
             mandible, linear, displaced, **self.post_processing,
         )
         mask = components > 0
 
         if self.verbose:
-            print(f'Scores: {scores}')
             draw_fracture_result(mandible, mask, target >= self.conf_thresh)
 
         # compute metrics
@@ -424,7 +407,6 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
             TensorType['P', 3, 2, torch.int64],
             TensorType[4, 4, torch.float32],
             TensorType[3, torch.int64],
-            TensorType[torch.float32],
         ],
         batch_idx: int,
     ) -> Tuple[
@@ -432,20 +414,14 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         TensorType['D', 'H', 'W', torch.bool],  
         TensorType[4, 4, torch.float32],
         TensorType[3, torch.int64],
-        TensorType[torch.float32],
-        TensorType[torch.float32],
     ]:
         files = self.trainer.datamodule.predict_dataset.files[batch_idx]
         print(files[0].parent.stem)
 
-        features, mandible, patch_idxs, affine, shape, counter = batch
-
-        # track processing times
-        preprocess_time = perf_counter() - counter
-        counter = perf_counter()
+        features, mandible, patch_idxs, affine, shape = batch
 
         # predict dense binary segmentations
-        sparse = self.predict_volume(features, patch_idxs)
+        sparse = self.predict_volumes(features, patch_idxs)
         linear, displaced = self.finetune_volumes(features, patch_idxs, sparse)
 
         # filter small connected components
@@ -456,7 +432,7 @@ class LinearDisplacedJawFracModule(pl.LightningModule):
         # fill corresponding voxels in source volume
         out = fill_source_volume(mask, affine, shape)
         
-        return mask, out, affine, shape, preprocess_time, counter
+        return mask, out, affine, shape
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],

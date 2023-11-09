@@ -1,5 +1,6 @@
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
+import nibabel
 import numpy as np
 from scipy import interpolate, ndimage
 import torch
@@ -191,6 +192,19 @@ def aggregate_dense_predictions(
         for slices in patch_slices:
             out[slices] += pred
             yield
+    elif mode == 'entropy':
+        # compute probability with minimum entropy
+        out = torch.full(out_shape, float('-inf'), device=patch_idxs.device)
+        entropy = torch.full(out_shape, float('inf'), device=patch_idxs.device)
+        pred = torch.empty(pred_shape, device=patch_idxs.device)
+        yield pred
+
+        for slices in patch_slices:
+            probs = torch.sigmoid(pred)
+            patch_entropy = -probs * torch.log(probs)
+            out[slices] = torch.where(patch_entropy < entropy[slices], pred, out[slices])
+            entropy[slices] = torch.minimum(entropy[slices], patch_entropy)
+            yield
     else:
         raise ValueError(f'Mode not recognized: {mode}.')
 
@@ -198,14 +212,42 @@ def aggregate_dense_predictions(
 
 
 def fill_source_volume(
-    volume_mask: TensorType['D', 'H', 'W', torch.bool],
+    volume_probs: TensorType['D', 'H', 'W', torch.float32],
     affine: TensorType[4, 4, torch.float32],
     shape: TensorType[3, torch.int64],
+    method: Literal['slow', 'fast']='fast',
 ) -> TensorType['D', 'H', 'W', torch.bool]:
+    if method == 'fast':
+        affine = np.linalg.inv(affine.cpu().numpy())
+        orientation = nibabel.io_orientation(affine)
+        out = nibabel.apply_orientation(
+            arr=volume_probs.cpu().numpy(),
+            ornt=orientation,
+        ).astype(float)
+
+        spacing = np.linalg.norm(affine[:, :3], axis=0)
+        xi = np.stack(np.meshgrid(*[
+            np.concatenate((np.arange(0, dim - 1, 1 / size), [dim - 1]))
+            for dim, size in zip(out.shape, spacing)
+        ], indexing='ij'), axis=-1)
+        seg = interpolate.interpn(
+            points=tuple([np.arange(dim) for dim in out.shape]),
+            values=out,
+            xi=xi,
+            method='linear',
+        )
+
+        seg = seg[:shape[0], :shape[1], :shape[2]]
+
+        return torch.from_numpy(seg).to(volume_probs)
+
+
     # compute voxel indices into source volume
     voxels = volume_mask.nonzero().float()
     hom_voxels = torch.column_stack((voxels, torch.ones_like(voxels[:, 0])))
 
+    print(affine)
+    torch.linalg.inv(affine)
     orig_voxels = torch.einsum(
         'ij,kj->ki', torch.linalg.inv(affine), hom_voxels,
     )

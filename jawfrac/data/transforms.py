@@ -151,7 +151,7 @@ class RegularSpacing:
         zoom = spacing / self.spacing
         
         # immediately return if zoom is not necessary
-        if np.all(zoom == 1):
+        if np.allclose(zoom, 1):
             data_dict['intensities'] = intensities
             data_dict['spacing'] = spacing
 
@@ -339,8 +339,9 @@ class MandiblePatchIndices:
             iterations=10,
         )
 
-        patches_mask = np.zeros(data_dict['patch_idxs'].shape[0], dtype=bool)
-        for i, patch_idxs in enumerate(data_dict['patch_idxs']):
+        patch_idxs = data_dict['patch_idxs'].reshape(-1, 3, 2)
+        patches_mask = np.zeros(patch_idxs.shape[0], dtype=bool)
+        for i, patch_idxs in enumerate(patch_idxs):
             slices = tuple(slice(start, stop) for start, stop in patch_idxs)
             patch = intensities[slices]
 
@@ -348,7 +349,7 @@ class MandiblePatchIndices:
             patches_mask[i] = mandible_mask.mean() >= self.volume_thresh
 
         data_dict['intensities'] = intensities
-        data_dict['patch_idxs'] = data_dict['patch_idxs'][patches_mask]
+        data_dict['patch_idxs'] = patch_idxs[patches_mask]
         data_dict['patch_classes'] = data_dict['patch_classes'][patches_mask]
 
         return data_dict
@@ -366,7 +367,7 @@ class PositiveNegativeIndices:
 
     def __init__(
         self,
-        volume_threshold: float=0.05,
+        volume_threshold: float=0.01,
     ) -> None:
         self.volume_thresh = volume_threshold
 
@@ -375,18 +376,21 @@ class PositiveNegativeIndices:
         labels: NDArray[Any],
         **data_dict: Dict[str, Any],
     ) -> Dict[str, Any]:
-        patch_classes = []
-        for patch_idxs in data_dict['patch_idxs']:
+        patch_idxs = data_dict['patch_idxs'].reshape(-1, 3, 2)
+        volumes = []
+        for patch_idxs in patch_idxs:
             # extract a patch from the volume
             slices = tuple(slice(start, stop) for start, stop in patch_idxs)
             patch = labels[slices]
             
             # determine if patch contains sufficient foreground voxels
-            label = 1 if patch.mean() >= self.volume_thresh else 0
-            patch_classes.append(label)
+            volumes.append(patch.mean())
+
+        volumes = np.array(volumes)
+        patch_classes = volumes >= self.volume_thresh
 
         data_dict['labels'] = labels
-        data_dict['patch_classes'] = np.array(patch_classes)
+        data_dict['patch_classes'] = patch_classes
 
         return data_dict
 

@@ -1,34 +1,39 @@
 work_dir: '/mnt/d/nielsvannistelrooij/logs'
-work_dir: '/home/mkaailab/Documents/jawfrac/test'
-work_dir: '/output'
-version: 101
+work_dir: '/home/mkaailab/Documents/logs/condyles'
+version: 109
 seed: 0
 
 model:
   channels_list: [16, 32, 64, 128]
   lr: 0.005
-  epochs: 500
+  epochs: 1000
   warmup_epochs: 20
   weight_decay: 0.01
   backbone: 'conv'
   num_awms: 3
   head_kernel_size: 1
   focal_loss: False
-  dice_loss: False
+  dice_loss: True
   max_dist: 2.0  # variance
   min_component_size: 20_000
   conf_threshold: 0.5
   x_axis_flip: True
+  # checkpoint_path: 'checkpoints/mandibles.ckpt'
 
 datamodule:
-  root: '/home/mkaailab/Documents/jawfrac/test'
-  root: '/input'
+  # root: '/home/mkaailab/Documents/condyles/nnUNet_raw/Dataset003_CondyleCrops'
+  # root: '/home/mkaailab/Documents/condyles/nnUNet_raw/Dataset004_CondyleNotchCrops'
+  # root: '/home/mkaailab/Documents/condyles/nnUNet_raw/Dataset005_CondyleNotchCoronoidCrops'
+  # root: '/home/mkaailab/Documents/condyles/nnUNet_raw/Dataset006_CondyleNotchCrops'
+  # root: '/mnt/diag/condyles/Esbjerg/Crops'
+  root: '/mnt/diag/condyles/Esbjerg/Cases'
+  # root: '/input'
   regex_filter: ''
   val_size: 0.2
   test_size: 0.0
-  batch_size: 40
+  batch_size: 16
   num_workers: 0
-  pin_memory: False
+  pin_memory: True
   persistent_workers: False
   regular_spacing: 0.4  # mm
   patch_size: 64

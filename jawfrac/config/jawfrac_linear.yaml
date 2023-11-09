@@ -25,13 +25,13 @@ model:
   focal_loss: False
   dice_loss: False
   conf_threshold: 0.1
-  min_component_size: 3000
+  min_component_size: 3072
   max_dist: 12.5
 
 datamodule:
   root: '/home/mka3dlab/Documents/fractures'
   root: '/mnt/diag/fractures'
-  regex_filter: 'Annotation UK'
+  regex_filter: 'Annotation UK/109'
   val_size: 0.2
   test_size: 0.2
   batch_size: 4

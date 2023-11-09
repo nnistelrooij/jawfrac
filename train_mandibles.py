@@ -56,7 +56,7 @@ def train():
         max_epochs=config['model']['epochs'],
         logger=logger,
         accumulate_grad_batches=config['accumulate_grad_batches'],
-        gradient_clip_val=35,
+        gradient_clip_val=2,
         callbacks=[
             epoch_checkpoint_callback,
             loss_checkpoint_callback,
