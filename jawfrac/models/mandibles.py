@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Literal, Tuple
 
 import numpy as np
 import pytorch_lightning as pl
@@ -85,6 +85,7 @@ class MandibleSegModule(pl.LightningModule):
         min_component_size: int,
         max_dist: float,
         batch_size: int=0,
+        interpolation: Literal['slow', 'fast']='fast',
         **model_cfg: Dict[str, Any],
     ) -> None:
         super().__init__()
@@ -104,6 +105,7 @@ class MandibleSegModule(pl.LightningModule):
         self.min_component_size = min_component_size
         self.max_dist = max_dist
         self.batch_size = batch_size
+        self.interpolation = interpolation
 
     def forward(
         self,
@@ -313,19 +315,28 @@ class MandibleSegModule(pl.LightningModule):
         coords, seg = self.predict_volumes(features, patch_idxs)
         seg = self.finetune_volume(features, patch_idxs, seg)
 
-        # fill volume with original shape given foreground mask
-        volume_probs = fill_source_volume(seg, affine, shape)
+        if self.interpolation == 'fast':
+            # remove small or low-confidence connected components
+            volume_mask = filter_connected_components(
+                coords, seg, self.conf_thresh, self.min_component_size, self.max_dist,
+            )
 
-        # remove small or low-confidence connected components
-        volume_mask = filter_connected_components(
-            torch.zeros(volume_probs.shape + (3,)).to(coords),
-            volume_probs,
-            self.conf_thresh, 
-            self.min_component_size,
-            self.max_dist,
-        )
+            # fill volume with original shape given foreground mask
+            volume_mask = fill_source_volume(volume_mask, affine, shape, method='fast')
+        else:
+            # fill volume with original shape given foreground mask
+            volume_probs = fill_source_volume(seg, affine, shape, method='slow')
 
-        return features[0], volume_probs, volume_mask, affine, shape
+            # remove small or low-confidence connected components
+            volume_mask = filter_connected_components(
+                torch.zeros(volume_probs.shape + (3,)).to(coords),
+                volume_probs,
+                self.conf_thresh, 
+                self.min_component_size,
+                self.max_dist,
+            )
+
+        return features[0], seg, volume_mask, affine, shape
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],

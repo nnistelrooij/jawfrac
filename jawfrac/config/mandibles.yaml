@@ -18,6 +18,7 @@ model:
   min_component_size: 20_000
   conf_threshold: 0.5
   x_axis_flip: True
+  interpolation: 'fast'
   # checkpoint_path: 'checkpoints/mandibles.ckpt'
 
 datamodule:

@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional, Tuple
+from typing import Any, List, Literal, Optional, Tuple
 
 import nibabel
 import numpy as np
@@ -212,7 +212,7 @@ def aggregate_dense_predictions(
 
 
 def fill_source_volume(
-    volume_probs: TensorType['D', 'H', 'W', torch.float32],
+    volume: TensorType['D', 'H', 'W', Any],
     affine: TensorType[4, 4, torch.float32],
     shape: TensorType[3, torch.int64],
     method: Literal['slow', 'fast']='fast',
@@ -221,7 +221,7 @@ def fill_source_volume(
         affine = np.linalg.inv(affine.cpu().numpy())
         orientation = nibabel.io_orientation(affine)
         out = nibabel.apply_orientation(
-            arr=volume_probs.cpu().numpy(),
+            arr=volume.cpu().numpy(),
             ornt=orientation,
         ).astype(float)
 
@@ -239,11 +239,10 @@ def fill_source_volume(
 
         seg = seg[:shape[0], :shape[1], :shape[2]]
 
-        return torch.from_numpy(seg).to(volume_probs)
-
+        return torch.from_numpy(seg).to(volume)
 
     # compute voxel indices into source volume
-    voxels = volume_mask.nonzero().float()
+    voxels = volume.nonzero().float()
     hom_voxels = torch.column_stack((voxels, torch.ones_like(voxels[:, 0])))
 
     print(affine)
@@ -278,4 +277,4 @@ def fill_source_volume(
             iterations=iterations,
         )
 
-    return torch.from_numpy(out).to(volume_mask)
+    return torch.from_numpy(out).to(volume)

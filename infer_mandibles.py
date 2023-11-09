@@ -8,8 +8,9 @@ import nibabel
 import numpy as np
 
 
-def infer():
+def infer(checkpoint, interpolation):
     with open('jawfrac/config/mandibles.yaml', 'r') as f:
+        config['model']['interpolation'] = interpolation
         config = yaml.safe_load(f)
 
     batch_size = config['datamodule'].pop('batch_size')
@@ -18,7 +19,7 @@ def infer():
     )
 
     model = MandibleSegModule.load_from_checkpoint(
-        'checkpoints/mandibles.ckpt',
+        checkpoint,
         num_classes=dm.num_classes,
         batch_size=batch_size,
         **config['model'],
@@ -45,4 +46,4 @@ def infer():
 
 if __name__ == '__main__':
     while True:
-        infer()
+        infer('checkpoints/mandibles.ckpt', interpolation='fast')
