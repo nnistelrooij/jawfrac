@@ -215,9 +215,12 @@ def fill_source_volume(
     volume: TensorType['D', 'H', 'W', Any],
     affine: TensorType[4, 4, torch.float32],
     shape: TensorType[3, torch.int64],
-    method: Literal['slow', 'fast']='fast',
+    method: Literal['slow', 'fast', 'none']='fast',
 ) -> TensorType['D', 'H', 'W', torch.bool]:
-    if method == 'fast':
+    if method == 'none':
+        return volume
+
+    if method == 'slow':
         affine = np.linalg.inv(affine.cpu().numpy())
         orientation = nibabel.io_orientation(affine)
         out = nibabel.apply_orientation(

@@ -18,7 +18,7 @@ model:
   min_component_size: 20_000
   conf_threshold: 0.5
   x_axis_flip: True
-  interpolation: 'fast'
+  interpolation: 'slow'
   # checkpoint_path: 'checkpoints/mandibles.ckpt'
 
 datamodule:
@@ -27,7 +27,7 @@ datamodule:
   # root: '/home/mkaailab/Documents/condyles/nnUNet_raw/Dataset005_CondyleNotchCoronoidCrops'
   # root: '/home/mkaailab/Documents/condyles/nnUNet_raw/Dataset006_CondyleNotchCrops'
   # root: '/mnt/diag/condyles/Esbjerg/Crops'
-  root: '/mnt/diag/condyles/Esbjerg/Cases'
+  root: '/home/mkaailab/Documents/condyles/test'
   # root: '/input'
   regex_filter: ''
   val_size: 0.2
@@ -38,7 +38,7 @@ datamodule:
   persistent_workers: False
   regular_spacing: 0.4  # mm
   patch_size: 64
-  stride: 24
+  stride: 32
   gamma_adjust: True
   max_patches_per_scan: 4
   ignore_outside: False

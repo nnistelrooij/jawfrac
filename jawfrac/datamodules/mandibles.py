@@ -25,7 +25,7 @@ class MandibleSegDataModule(VolumeDataModule):
         **dm_cfg: Dict[str, Any],
     ) -> None:
         # use files functions from JawFrac when inferring for fracture data
-        if 'fractures' in str(root) or str(root) == '/input':
+        if 'fractures' in str(root):  #  or str(root) == '/input':
             self._files = partial(JawFracDataModule._files, self)
             self._filter_files = partial(JawFracDataModule._filter_files, self)
 
@@ -64,7 +64,7 @@ class MandibleSegDataModule(VolumeDataModule):
         return files
 
     def _files(self, stage: str) -> List[Tuple[Path, ...]]:
-        scan_files = self._filter_files('**/*_*.nii.gz')
+        scan_files = self._filter_files('**/*.nii.gz')
 
         if stage == 'predict':
             return list(zip(scan_files))
@@ -123,7 +123,7 @@ class MandibleSegDataModule(VolumeDataModule):
 
         if stage is None or stage == 'predict':
             all_files = self._files('predict')
-            
+
             non_mandible_files = []
             for files in all_files:
                 mandible_file = self.root / files[0].parent / f'{files[0].stem[:-9]}.nii.gz'
@@ -134,7 +134,7 @@ class MandibleSegDataModule(VolumeDataModule):
 
             self.predict_dataset = MandibleSegDataset(
                 stage='predict',
-                files=non_mandible_files[:1],
+                files=non_mandible_files[:4],
                 transform=self.default_transforms,
                 **self.dataset_cfg,
             )

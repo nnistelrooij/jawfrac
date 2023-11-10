@@ -1,17 +1,17 @@
 import pytorch_lightning as pl
 import yaml
-from tqdm import tqdm
 
 from jawfrac.datamodules import MandibleSegDataModule
 from jawfrac.models import MandibleSegModule
-import nibabel
-import numpy as np
 
 
-def infer(checkpoint, interpolation):
+def infer(checkpoint, interpolation='fast', root=None, channels_list=[16, 32, 64, 128]):
     with open('jawfrac/config/mandibles.yaml', 'r') as f:
-        config['model']['interpolation'] = interpolation
         config = yaml.safe_load(f)
+        if root is not None:
+            config['datamodule']['root'] = root
+        config['model']['interpolation'] = interpolation
+        config['model']['channels_list'] = channels_list
 
     batch_size = config['datamodule'].pop('batch_size')
     dm = MandibleSegDataModule(
@@ -32,16 +32,7 @@ def infer(checkpoint, interpolation):
     )
     preds = trainer.predict(model, datamodule=dm)
 
-    for i, volume in enumerate(tqdm(preds, desc='Writing NIfTI files')):
-        # get original scan
-        path = dm.root / dm.predict_dataset.files[i][0]
-        img = nibabel.load(path)
-        affine = img.affine
-
-        # save to storage
-        volume = volume[2].cpu().numpy().astype(np.uint8)
-        img = nibabel.Nifti1Image(volume, affine)
-        nibabel.save(img, path.parent / f'{path.stem[:-9]}.nii.gz')
+    return preds
 
 
 if __name__ == '__main__':
