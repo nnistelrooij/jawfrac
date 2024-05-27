@@ -1,6 +1,6 @@
 # JawFrac
 
-Welcome to the repository accompanying the paper *JawFracNet: Detecting Mandibular Fractures through Dense and Sparse Supervision*.
+Welcome to the repository accompanying the paper *Detecting Mandible Fractures in CBCT Scans using Three-Stage Neural Network*.
 
 An Algorithm of the method can be tried out at [Grand Challenge](https://grand-challenge.org/algorithms/jaw-frac-net/). Simply upload a NIfTI file containing a mandible and infer where fractures were detected.
 
@@ -42,10 +42,10 @@ Again, specify `work_dir`, `checkpoint_path`, and `root` in `jawfrac/config/frac
 ## Cite
 
 ```
-@masterthesis{
-    author={Niels van Nistelrooij},
-    institution={Radboud University},
-    year={2022},
-    month={12},
+@article{jawfracnet,
+    author = {van Nistelrooij, Niels and Schitter, Sophie and van Lierop, Pieter and El Ghoul, Khalid and K{\"o}nig, Daniela and Hanisch, Marcel and Tel, Alessandro and Xi, Tong and Thiem, Daniel and Smeets, Ralf and Dubois, Leander and Fl{\"u}gge, Tabea and van Ginneken, Bram and Berg{\'e}, Stefaan and Vinayahalingam, Shankeeth},
+    year = {In press}
+    title = {Detecting Mandible Fractures in CBCT Scans using Three-Stage Neural Network},
+    journal = {Journal of Dental Research}
 }
 ```
