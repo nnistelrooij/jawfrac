@@ -26,7 +26,7 @@ def infer(checkpoint, interpolation='fast', root=None, channels_list=[16, 32, 64
     )
 
     trainer = pl.Trainer(
-        accelerator='gpu',
+        accelerator='auto',
         devices=1,
         max_epochs=config['model']['epochs'],
     )

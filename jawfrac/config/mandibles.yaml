@@ -25,9 +25,9 @@ datamodule:
   # root: '/home/mkaailab/Documents/condyles/nnUNet_raw/Dataset003_CondyleCrops'
   # root: '/home/mkaailab/Documents/condyles/nnUNet_raw/Dataset004_CondyleNotchCrops'
   # root: '/home/mkaailab/Documents/condyles/nnUNet_raw/Dataset005_CondyleNotchCoronoidCrops'
-  # root: '/home/mkaailab/Documents/condyles/nnUNet_raw/Dataset006_CondyleNotchCrops'
+  root: '/home/mkaailab/Documents/CBCT/condyles/nnUNet_raw/Dataset007_AllCondyles'
   # root: '/mnt/diag/condyles/Esbjerg/Crops'
-  root: '/home/mkaailab/Documents/condyles/test'
+  # root: '/home/mkaailab/Documents/condyles/test'
   # root: '/input'
   regex_filter: ''
   val_size: 0.2

@@ -341,7 +341,7 @@ class MandibleSegModule(pl.LightningModule):
                 self.max_dist,
             )
 
-        return features[0].cpu().numpy(), volume_mask
+        return features[0].cpu().numpy(), volume_probs
 
     def configure_optimizers(self) -> Tuple[
         List[torch.optim.Optimizer],
