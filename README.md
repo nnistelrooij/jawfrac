@@ -44,8 +44,10 @@ Again, specify `work_dir`, `checkpoint_path`, and `root` in `jawfrac/config/frac
 ```
 @article{jawfracnet,
     author = {van Nistelrooij, Niels and Schitter, Sophie and van Lierop, Pieter and El Ghoul, Khalid and K{\"o}nig, Daniela and Hanisch, Marcel and Tel, Alessandro and Xi, Tong and Thiem, Daniel and Smeets, Ralf and Dubois, Leander and Fl{\"u}gge, Tabea and van Ginneken, Bram and Berg{\'e}, Stefaan and Vinayahalingam, Shankeeth},
-    year = {In press}
+    year = {2024},
+    month = {06},
     title = {Detecting Mandible Fractures in CBCT Scans using Three-Stage Neural Network},
-    journal = {Journal of Dental Research}
+    journal = {Journal of Dental Research},
+    doi = {10.1177/00220345241256618}
 }
 ```
